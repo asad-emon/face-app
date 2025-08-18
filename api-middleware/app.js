@@ -24,7 +24,8 @@ app.get("/", (req, res) => {
   res.json({ message: "Service is working 🚀" });
 });
 
-app.use(express.json());
+app.use(express.json({limit: '8mb'}));
+app.use(express.urlencoded({limit: '8mb'}));
 
 app.post("/api/proxy", async (req, res) => {  
   const response = await fetch(`${process.env.INFERENCE_BASE_URL}/swap`, {
