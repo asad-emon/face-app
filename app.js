@@ -1,11 +1,13 @@
 import express from "express";
 import fetch from "node-fetch";
+import dotenv from "dotenv";
 
+dotenv.config();
 const app = express();
 const port = 7860;
 
 app.use(express.json());
-const user = process.env.USERNAME;
+const user = process.env.USER_NAME;
 const space = process.env.SPACE_NAME;
 
 app.post("/api/proxy", async (req, res) => {
