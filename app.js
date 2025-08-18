@@ -7,6 +7,8 @@ const port = 7860;
 app.use(express.json());
 const user = process.env.USERNAME;
 const space = process.env.SPACE_NAME;
+console.log("user", user, "space", space);
+
 app.post("/api/proxy", async (req, res) => {
   const response = await fetch(`https://huggingface.co/spaces/${user}/${space}/swap`, {
     method: "POST",
@@ -18,7 +20,6 @@ app.post("/api/proxy", async (req, res) => {
   });
   const data = await response.json();
   
-  console.log(data);
   res.json(data);
 });
 
