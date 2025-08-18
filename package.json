@@ -1,25 +1,22 @@
 {
-  "name": "hf-proxy-server",
-  "version": "1.0.0",
-  "description": "A simple proxy server for Hugging Face Spaces",
-  "main": "app.js",
+  "name": "faceapp-web",
+  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js"
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite preview --port 7860 --host"
   },
   "dependencies": {
-    "dotenv": "^17.2.1",
-    "express": "^4.18.2",
-    "node-fetch": "^3.3.2"
+    "localforage": "^1.10.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "MIT"
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.3.1"
+  }
 }
