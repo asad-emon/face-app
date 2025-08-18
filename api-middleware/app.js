@@ -13,7 +13,7 @@ const app = express();
 // allow specific origins:
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://face-app-93d8.onrender.com/"],
+    origin: ["http://localhost:3000", "https://face-app-93d8.onrender.com"],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true, // cookies/auth headers
   })
@@ -25,13 +25,9 @@ app.get("/", (req, res) => {
 });
 
 app.use(express.json());
-const user = process.env.USER_NAME;
-const space = process.env.SPACE_NAME;
-const inferenceBaseUrl = `https://${user}-${space}.hf.space`;
-// const inferenceBaseUrl = "http://localhost:7860";
 
 app.post("/api/proxy", async (req, res) => {  
-  const response = await fetch(`${inferenceBaseUrl}/swap`, {
+  const response = await fetch(`${process.env.INFERENCE_BASE_URL}/swap`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${process.env.HF_TOKEN}`,
