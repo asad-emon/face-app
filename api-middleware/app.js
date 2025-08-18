@@ -13,7 +13,7 @@ const app = express();
 // allow specific origins:
 app.use(
   cors({
-    origin: ["http://localhost:3000"],
+    origin: ["http://localhost:3000", "https://face-app-93d8.onrender.com/"],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true, // cookies/auth headers
   })
