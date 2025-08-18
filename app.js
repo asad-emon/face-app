@@ -16,8 +16,9 @@ app.post("/api/proxy", async (req, res) => {
     },
     body: JSON.stringify(req.body)
   });
-
   const data = await response.json();
+  
+  console.log(data);
   res.json(data);
 });
 
