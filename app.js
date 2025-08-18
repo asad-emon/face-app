@@ -15,7 +15,7 @@ app.post("/api/proxy", async (req, res) => {
       "Authorization": `Bearer ${process.env.HF_TOKEN}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(req.body)
+    body: req.body
   });
   const data = await response.json();
   
