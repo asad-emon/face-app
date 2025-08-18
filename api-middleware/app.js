@@ -27,8 +27,8 @@ app.get("/", (req, res) => {
 app.use(express.json());
 const user = process.env.USER_NAME;
 const space = process.env.SPACE_NAME;
-// const inferenceBaseUrl = `https://${user}-${space}.hf.space`;
-const inferenceBaseUrl = "http://localhost:7860";
+const inferenceBaseUrl = `https://${user}-${space}.hf.space`;
+// const inferenceBaseUrl = "http://localhost:7860";
 
 app.post("/api/proxy", async (req, res) => {  
   const response = await fetch(`${inferenceBaseUrl}/swap`, {
