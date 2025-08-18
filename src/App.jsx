@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import './styles.css'
 import { saveImage, listImages, getImageBlob, removeImage, clearAll } from './storage.js'
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+
 function TabButton({ active, onClick, children }) {
   return <button className={active ? 'tab active' : 'tab'} onClick={onClick}>{children}</button>
 }
@@ -102,24 +104,22 @@ function UploadTab() {
   const uploadImage = async (base64Image) => {
     setBusy(true);
     try {
-      const formData = new FormData();
-      formData.append('image_base64', base64Image);
-      const token = process.env.HUGGINGFACE_TOKEN
-
-      const response = await fetch('https://asadujjaman-emon-reactor-hf.hf.space/swap', {
+      const requestObj = {
         method: 'POST',
-        body: formData,
+        body: JSON.stringify({ image_base64: base64Image }),
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         }
-      });
+      };
+
+      const response = await fetch(`${apiBaseUrl}/api/proxy`, requestObj);
 
       if (response.ok) {
         const responseData = await response.json();
         if (responseData.result) {
           // Handle base64 encoded image
           const dataUrl = responseData.result;
-          
+
           const [meta, base64Data] = dataUrl.split(',');
           const mime = meta.match(/:(.*?);/)?.[1] || 'image/png';
 
@@ -129,10 +129,11 @@ function UploadTab() {
           alert('Success', 'Image uploaded successfully!');
         }
       } else {
-        alert('Error', 'Failed to upload image');
+        alert('Error, Failed to upload image');
       }
     } catch (error) {
-      alert('Error', 'Network error occurred');
+      console.error('Network error:', error);
+      alert('Error, Network error occurred');
     } finally {
       setBusy(false);
     }
