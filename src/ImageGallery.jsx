@@ -93,9 +93,9 @@ export default function ImageGallery() {
       )}
 
       {preview && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Preview</h3>
-          <img src={preview} alt="preview" style={{ maxWidth: '100%', borderRadius: 12, border: '1px solid #293349' }} />
+        <div className="modal" onClick={() => setPreview(null)}>
+          <img src={preview} alt="preview" className="modal-content" />
+          <button className="modal-close" onClick={() => setPreview(null)}>&times;</button>
         </div>
       )}
     </div>
