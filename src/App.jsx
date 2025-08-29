@@ -22,7 +22,7 @@ export default function App() {
         {tab === 'upload' ? <ImageUpload /> : <ImageGallery />}
       </Authentication>
       <div style={{ marginTop: 16 }} className="muted">
-        Converted from Expo/React Native to a standalone React web app using Vite and IndexedDB for on-device storage.
+        A standalone React web app using Vite and IndexedDB for on-device storage.
       </div>
     </div>
   );
