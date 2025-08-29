@@ -15,7 +15,7 @@ export default function App() {
   return (
     <div className="container">
       <Authentication>
-        <div className="tabs">
+        <div className="tabs" style={{ marginTop: 16 }}>
           <TabButton active={tab === 'upload'} onClick={() => setTab('upload')}>Upload</TabButton>
           <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')}>Gallery</TabButton>
         </div>

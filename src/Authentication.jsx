@@ -37,10 +37,14 @@ const Authentication = ({ children }) => {
     <div>
       {user ? (
         <>
-          <div className="row" style={{ alignItems: 'center'}}>
-            <img src={user.photoURL} alt="Profile" style={{ width: '50px', height: '50px', borderRadius: '50%' }} />
-            <div style={{ padding: '10px' }}>Welcome, {user.displayName}</div>
-            <button className="btn" onClick={handleSignOut}>Sign Out</button>        
+          <div className="row space-between">
+            <div className="">
+              <img src={user.photoURL} alt="Profile" style={{ width: '80px', height: '80px', borderRadius: '50%' }} />
+            </div>
+            <div className="text-end">
+              <div style={{ padding: '10px' }}>Welcome, {user.displayName}</div>
+              <button className="btn" onClick={handleSignOut}>Sign Out</button>        
+            </div>
           </div>
           {children}
         </>

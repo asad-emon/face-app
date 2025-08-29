@@ -6,6 +6,8 @@ body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI
 .tab.active { background:#1e2433; border-color:#2a3347; }
 .card { background:#111622; border:1px solid #222a3a; border-radius:16px; padding:16px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
 .row { display:flex; gap:16px; flex-wrap:wrap; }
+.space-between { justify-content:space-between; }
+.text-end { text-align:end; }
 .btn { padding: 10px 16px; border-radius: 10px; border: 1px solid #2a3347; background:#1a2030; color:#e6e9ef; cursor:pointer; }
 .btn:disabled { opacity:.6; cursor:not-allowed; }
 input[type="text"] { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2a3347; background:#0f131d; color:#e6e9ef; }
