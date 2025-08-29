@@ -1,55 +1,69 @@
-
-import React, { useEffect, useMemo, useState } from 'react';
-import { listImages, getImageBlob, removeImage, clearAll } from './storage.js';
+import React, { useContext, useEffect, useState } from 'react';
+import { AuthContext } from './AuthContext';
+import { listImages, deleteImage } from './imageStore'; // Using the new unified image store
+import { clearFiles as clearLocalFiles } from './localStore'; // For clearing the gallery
 import './styles.css';
 
-function useObjectURL(blob) {
-  const url = useMemo(() => blob ? URL.createObjectURL(blob) : null, [blob]);
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
-  return url;
-}
-
-function ImageThumb({ id, onClick }) {
-  const [blob, setBlob] = useState(null);
-  useEffect(() => { (async () => { setBlob(await getImageBlob(id)); })(); }, [id]);
-  const url = useObjectURL(blob);
-  return <img src={url || ''} className="thumb" alt="" onClick={onClick} style={{ cursor: 'pointer' }} />;
-}
+const useLocalStorage = import.meta.env.VITE_USE_LOCAL_STORAGE === '1';
 
 export default function ImageGallery() {
+  const { user } = useContext(AuthContext);
   const [items, setItems] = useState([]);
-  const [preview, setPreview] = useState(null); // { id, blob }
+  const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
-    const list = await listImages();
-    setItems(list);
+    if (!user) {
+      setItems([]);
+      return;
+    }
+    setBusy(true);
+    try {
+      const imageList = await listImages();
+      setItems(imageList);
+    } catch (e) {
+      console.error("Failed to fetch images", e);
+      alert("Failed to fetch images: " + e.message);
+    }
+    setBusy(false);
   }
 
-  useEffect(() => { refresh(); }, []);
-
-  async function openItem(meta) {
-    const blob = await getImageBlob(meta.id);
-    setPreview({ id: meta.id, blob });
-  }
-
-  async function deleteItem(id) {
-    if (!confirm('Delete this image?')) return;
-    await removeImage(id);
-    if (preview?.id === id) setPreview(null);
+  useEffect(() => {
     refresh();
+  }, [user]);
+
+  async function deleteItem(item) {
+    if (!confirm('Delete this image?')) return;
+    try {
+        // The `id` property is used for IndexedDB, while `fullPath` is for Firebase.
+        const idToDelete = useLocalStorage ? item.id : item.fullPath;
+        await deleteImage(idToDelete);
+        if (preview === item.url) setPreview(null);
+        refresh();
+    } catch (e) {
+        console.error("Failed to delete image", e);
+        alert("Failed to delete image: " + e.message);
+    }
   }
 
   async function clearGallery() {
     if (!confirm('Delete ALL images?')) return;
     setBusy(true);
-    await clearAll();
-    setPreview(null);
-    await refresh();
+    try {
+        if (useLocalStorage) {
+            await clearLocalFiles(user.uid);
+        } else {
+            // For Firebase, delete each item individually.
+            await Promise.all(items.map(item => deleteImage(item.fullPath)));
+        }
+        setPreview(null);
+        await refresh();
+    } catch (e) {
+        console.error("Failed to clear gallery", e);
+        alert("Failed to clear gallery: " + e.message);
+    }
     setBusy(false);
   }
-
-  const previewUrl = useObjectURL(preview?.blob || null);
 
   return (
     <div className="card">
@@ -67,14 +81,11 @@ export default function ImageGallery() {
         <div className="muted">No images stored yet. Save some from the Upload tab.</div>
       ) : (
         <div className="grid">
-          {items.map(meta => (
-            <div key={meta.id} className="card" style={{ padding: 12 }}>
-              <ImageThumb id={meta.id} onClick={() => openItem(meta)} />
+          {items.map(item => (
+            <div key={item.url} className="card" style={{ padding: 12 }}>
+              <img src={item.url} className="thumb" alt="" onClick={() => setPreview(item.url)} style={{ cursor: 'pointer' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-                <span className="muted" title={new Date(meta.createdAt).toLocaleString()}>
-                  {new Date(meta.createdAt).toLocaleDateString()}
-                </span>
-                <button className="btn" onClick={() => deleteItem(meta.id)}>Delete</button>
+                <button className="btn" onClick={() => deleteItem(item)}>Delete</button>
               </div>
             </div>
           ))}
@@ -84,7 +95,7 @@ export default function ImageGallery() {
       {preview && (
         <div className="card" style={{ marginTop: 16 }}>
           <h3 style={{ marginTop: 0 }}>Preview</h3>
-          <img src={previewUrl} alt="preview" style={{ maxWidth: '100%', borderRadius: 12, border: '1px solid #293349' }} />
+          <img src={preview} alt="preview" style={{ maxWidth: '100%', borderRadius: 12, border: '1px solid #293349' }} />
         </div>
       )}
     </div>

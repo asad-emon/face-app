@@ -1,7 +1,7 @@
-
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { saveImage } from './storage.js';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
+import { AuthContext } from './AuthContext';
+import { uploadImage } from './imageStore'; // Using the new unified image store
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
@@ -11,11 +11,37 @@ function useObjectURL(blob) {
   return url;
 }
 
+// Helper to convert a base64 string back to a Blob
+function base64ToBlob(base64, contentType = '', sliceSize = 512) {
+  const byteCharacters = atob(base64);
+  const byteArrays = [];
+  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+    const slice = byteCharacters.slice(offset, offset + sliceSize);
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    byteArrays.push(byteArray);
+  }
+  return new Blob(byteArrays, { type: contentType });
+}
+
+// Helper to read a file as a base64 string
+function getBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+  });
+}
+
 export default function ImageUpload() {
+  const { user } = useContext(AuthContext);
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
   const [inputUrl, setInputUrl] = useState('');
-
   const fileRef = useRef();
 
   async function onPickFile(e) {
@@ -26,21 +52,18 @@ export default function ImageUpload() {
 
   async function onPasteFromClipboard() {
     try {
-      if ('clipboard' in navigator && 'read' in navigator.clipboard) {
-        const items = await navigator.clipboard.read();
-        for (const item of items) {
-          for (const type of item.types) {
-            if (type.startsWith('image/')) {
-              const blob = await item.getType(type);
-              setSelected(blob);
-              return;
-            }
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            const file = new File([blob], "pasted-image.png", { type: blob.type });
+            setSelected(file);
+            return;
           }
         }
-        alert('No image in clipboard. Copy an image and try again.');
-      } else {
-        alert('Clipboard image read not supported in this browser.');
       }
+      alert('No image in clipboard.');
     } catch (e) {
       alert('Clipboard error: ' + e.message);
     }
@@ -50,9 +73,11 @@ export default function ImageUpload() {
     if (!inputUrl) return;
     try {
       setBusy(true);
-      const res = await fetch(inputUrl);
-      const blob = await res.blob();
-      setSelected(blob);
+      const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(inputUrl)}`);
+      if (!response.ok) throw new Error(`Failed to fetch: ${response.statusText}`);
+      const blob = await response.blob();
+      const file = new File([blob], "downloaded-image.png", { type: blob.type });
+      setSelected(file);
     } catch (e) {
       alert('Failed to fetch image: ' + e.message);
     } finally {
@@ -60,91 +85,47 @@ export default function ImageUpload() {
     }
   }
 
-  async function onUpload() {
+  async function handleUpload() {
     if (!selected) return;
-    await getBase64(selected) // `file` your img file
-      .then(res => uploadImage(res)) // `res` base64 of img file
-      .catch(err => console.log(err));
-  }
-
-  async function getBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        resolve(reader.result);
-      };
-      reader.onerror = reject;
-    });
-  }
-
-  function base64ToBlob(base64, contentType = '', sliceSize = 512) {
-    const byteCharacters = atob(base64);
-    const byteArrays = [];
-
-    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-      const slice = byteCharacters.slice(offset, offset + sliceSize);
-
-      const byteNumbers = new Array(slice.length);
-      for (let i = 0; i < slice.length; i++) {
-        byteNumbers[i] = slice.charCodeAt(i);
-      }
-
-      const byteArray = new Uint8Array(byteNumbers);
-      byteArrays.push(byteArray);
+    if (!user) {
+      alert('You must be logged in to upload images.');
+      return;
     }
 
-    return new Blob(byteArrays, { type: contentType });
-  }
-
-  const uploadImage = async (base64Image) => {
     setBusy(true);
     try {
-      const requestObj = {
+      const base64Image = await getBase64(selected);
+
+      const response = await fetch(`${apiBaseUrl}/api/proxy`, {
         method: 'POST',
         body: JSON.stringify({ image_base64: base64Image }),
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      };
+        headers: { 'Content-Type': 'application/json' },
+      });
 
-      const response = await fetch(`${apiBaseUrl}/api/proxy`, requestObj);
-
-      if (response.ok) {
-        const responseData = await response.json();
-        if (responseData.result) {
-          // Handle base64 encoded image
-          const dataUrl = responseData.result;
-
-          const [meta, base64Data] = dataUrl.split(',');
-          const mime = meta.match(/:(.*?);/)?.[1] || 'image/png';
-
-          const imgBlob = base64ToBlob(base64Data, mime);
-
-          onSaveToGallery(imgBlob);
-          alert('Success', 'Image uploaded successfully!');
-        }
-      } else {
-        alert('Error, Failed to upload image');
+      if (!response.ok) {
+        throw new Error('Failed to process image with the AI service.');
       }
-    } catch (error) {
-      console.error('Network error:', error);
-      alert('Error, Network error occurred');
-    } finally {
-      setBusy(false);
-    }
-  };
 
-  async function onSaveToGallery(fileOrBlob) {
-    if (!fileOrBlob) return;
-    try {
-      setBusy(true);
-      const name = typeof fileOrBlob.name === 'string' ? fileOrBlob.name : 'pasted-image.png';
-      await saveImage(fileOrBlob, name);
+      const responseData = await response.json();
+      if (!responseData.result) {
+        throw new Error('The AI service did not return a result.');
+      }
+
+      const dataUrl = responseData.result;
+      const [meta, base64Data] = dataUrl.split(',');
+      const mime = meta.match(/:(.*?);/)?.[1] || 'image/png';
+      const processedBlob = base64ToBlob(base64Data, mime);
+      const originalName = typeof selected.name === 'string' ? selected.name : 'processed.png';
+      const processedFile = new File([processedBlob], `processed_${originalName}`, { type: mime });
+      
+      // Use the unified imageStore to upload the *processed* file
+      await uploadImage(processedFile);
+
       setSelected(null);
-      alert('Saved to gallery. Open the Gallery tab to view.');
-    } catch (e) {
-      alert('Failed to save: ' + e.message);
+      alert('Image processed and saved successfully!');
+    } catch (error) {
+      console.error('Upload process failed:', error);
+      alert('Error: ' + error.message);
     } finally {
       setBusy(false);
     }
@@ -180,7 +161,7 @@ export default function ImageUpload() {
         <div className="row" style={{ alignItems: 'center' }}>
           <img src={previewUrl} className="thumb" alt="preview" />
           <div className="row">
-            <button className="btn" onClick={onUpload} disabled={busy}>Save to Gallery</button>
+            <button className="btn" onClick={handleUpload} disabled={busy}>Save to Gallery</button>
             <button className="btn" onClick={() => setSelected(null)} disabled={busy}>Clear</button>
           </div>
         </div>

@@ -1,21 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { auth, signInWithGooglePopup } from './firebase';
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import React, { useContext } from 'react';
+import { AuthContext } from './AuthContext';
+import { signInWithGooglePopup } from './firebase';
+import { signOut } from "firebase/auth";
+import { auth } from './firebase';
 
 const signOutUser = () => signOut(auth);
 
 const Authentication = ({ children }) => {
-  const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+  const { user } = useContext(AuthContext);
 
   const handleSignIn = async () => {
     try {
