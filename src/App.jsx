@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import './styles.css'
 import { saveImage, listImages, getImageBlob, removeImage, clearAll } from './storage.js'
+import Authentication from './Authentication';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
 
@@ -281,6 +282,7 @@ export default function App() {
   const [tab, setTab] = useState('upload')
   return (
     <div className="container">
+      <Authentication />
       <div className="tabs">
         <TabButton active={tab === 'upload'} onClick={() => setTab('upload')}>Upload</TabButton>
         <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')}>Gallery</TabButton>
