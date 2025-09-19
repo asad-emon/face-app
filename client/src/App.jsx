@@ -1,9 +1,7 @@
-
-import React, { useState } from 'react';
-import Authentication from './Authentication';
+import React, { useState, useEffect } from 'react';
 import ImageGallery from './ImageGallery';
 import ImageUpload from './ImageUpload';
-import { AuthProvider } from './AuthContext';
+import Login from './Login'; // Assuming you will create this component
 import './styles.css';
 
 function TabButton({ active, onClick, children }) {
@@ -12,21 +10,30 @@ function TabButton({ active, onClick, children }) {
 
 export default function App() {
   const [tab, setTab] = useState('upload');
+  const [token, setToken] = useState(localStorage.getItem('token'));
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setToken(null);
+  };
+
+  if (!token) {
+    return <Login setToken={setToken} />;
+  }
 
   return (
-    <AuthProvider>
-      <div className="container">
-        <Authentication>
-          <div className="tabs" style={{ marginTop: 16 }}>
-            <TabButton active={tab === 'upload'} onClick={() => setTab('upload')}>Upload</TabButton>
-            <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')}>Gallery</TabButton>
-          </div>
-          {tab === 'upload' ? <ImageUpload /> : <ImageGallery />}
-        </Authentication>
-        <div style={{ marginTop: 16 }} className="muted">
-          A standalone React web app using Vite and IndexedDB for on-device storage.
-        </div>
+    <div className="container">
+      <div className="header">
+        <button onClick={handleLogout} className="logout-button">Logout</button>
       </div>
-    </AuthProvider>
+      <div className="tabs" style={{ marginTop: 16 }}>
+        <TabButton active={tab === 'upload'} onClick={() => setTab('upload')}>Upload</TabButton>
+        <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')}>Gallery</TabButton>
+      </div>
+      {tab === 'upload' ? <ImageUpload token={token} /> : <ImageGallery token={token} />}
+      <div style={{ marginTop: 16 }} className="muted">
+        A modern, database-driven face swapping application.
+      </div>
+    </div>
   );
 }
