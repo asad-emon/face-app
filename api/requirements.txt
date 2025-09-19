@@ -1,0 +1,15 @@
+einops
+fastapi
+huggingface_hub
+insightface
+numpy
+onnxruntime
+opencv-python-headless
+pillow
+python-multipart
+requests
+safetensors
+scikit-image
+torch
+torchvision
+uvicorn
