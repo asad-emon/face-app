@@ -4,9 +4,7 @@ import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 from insightface.app import FaceAnalysis
 from insightface import model_zoo
-import torch
 import numpy as np
-from safetensors.torch import save_file
 
 # -------------------------
 # Configuration Constants
@@ -52,37 +50,3 @@ def initialize_models():
 # --- Main Exported Models ---
 # These are loaded once when the application starts
 FACE_ANALYZER, SWAPPER, GPEN_SESSION = initialize_models()
-
-def store_embeddings(image_files, dataset_name):
-    """Store embeddings as a .safetensors file."""
-    all_embeddings = []
-    for image_path in image_files:
-        try:
-            img = np.array(Image.open(image_path).convert("RGB"))
-            faces = FACE_ANALYZER.get(img)
-            if faces:
-                # Using the first face found in the image and its embedding
-                all_embeddings.append(faces[0].normed_embedding)
-        except Exception as e:
-            print(f"Warning: Could not process image {image_path}. Error: {e}")
-    if not all_embeddings:
-        print("Warning: No faces found in the uploaded dataset.")
-        return None
-    # --- New Logic: Average embeddings and save as .safetensors ---
-    # 1. Average the embeddings to get a single representative vector
-    avg_embedding = np.mean(np.array(all_embeddings), axis=0)
-    # 2. Convert to PyTorch tensor
-    embedding_tensor = torch.from_numpy(avg_embedding).float()
-    # 3. Prepare data for safetensors format
-    tensors_dict = {"embedding": embedding_tensor}
-    
-    # Save embeddings
-    if not os.path.exists(LOCAL_MODEL_DIR):
-        os.makedirs(LOCAL_MODEL_DIR)
-    # 4. Change file extension to .safetensors
-    embeddings_file = os.path.join(LOCAL_MODEL_DIR, f"{dataset_name}.safetensors")
-    
-    # 5. Use save_file from safetensors to save the tensor
-    save_file(tensors_dict, embeddings_file)
-    
-    return embeddings_file

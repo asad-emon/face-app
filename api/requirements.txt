@@ -13,3 +13,8 @@ scikit-image
 torch
 torchvision
 uvicorn
+sqlalchemy
+psycopg2-binary
+alembic
+passlib
+python-jose

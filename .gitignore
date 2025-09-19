@@ -3,4 +3,5 @@
 *.env
 venv
 *__pycache__
-api/app/models*
+api/app/models/*
+.vite

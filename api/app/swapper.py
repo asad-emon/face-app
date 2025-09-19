@@ -1,10 +1,8 @@
-import os
 import numpy as np
 from PIL import Image
 import cv2
-from safetensors import safe_open
 from skimage.exposure import match_histograms
-from .face_models import FACE_ANALYZER, SWAPPER, GPEN_SESSION, LOCAL_MODEL_DIR # <-- Import shared models
+from .face_models import FACE_ANALYZER, SWAPPER, GPEN_SESSION
 
 class DummyFace:
     def __init__(self, embedding):
@@ -45,46 +43,37 @@ def create_feather_mask(h, w, feather=30):
     mask = cv2.GaussianBlur(mask, (feather*2+1, feather*2+1), 0)
     return mask[..., None]
 
-def find_closest_face(face_embedding, embeddings_array):
-    """
-    Finds the index of the closest face embedding in the embeddings array.
-    """
-    distances = np.linalg.norm(embeddings_array - face_embedding, axis=1)
-    closest_index = np.argmin(distances)
-    return closest_index
-
 # -------------------------
 # Main face swap logic
 # -------------------------
-def swap_faces(pil_img, weight_file):
+def swap_faces(pil_img, source_embedding):
     img_rgb = np.array(pil_img)
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     
     faces = FACE_ANALYZER.get(img_bgr)
 
-    embeddings_file = os.path.join(LOCAL_MODEL_DIR, weight_file + ".safetensors")
+    norm = np.linalg.norm(source_embedding)
+    if norm > 0:
+        embedding = source_embedding / norm
+    else:
+        embedding = source_embedding
+    source_face = DummyFace(embedding)
 
     for face in faces:
         if face.normed_embedding is None:
             print("Warning: embedding not found for a face, skipping.")
             continue
         
-        # Load the embeddings from the .safetensors file
-        with safe_open(embeddings_file, framework="pt", device="cpu") as f:
-            embedding = f.get_tensor("embedding").numpy().flatten()
-        norm = np.linalg.norm(embedding)
-        if norm > 0:
-            embedding = embedding / norm
-        source_face = DummyFace(embedding)
-
-        # Use the swapper.get() method
         img_bgr = SWAPPER.get(img_bgr, face, source_face, paste_back=True)
 
-        # Apply GPEN restoration and color matching
         x1, y1, x2, y2 = face.bbox.astype(int)
         x1, y1, x2, y2 = enlarge_box((x1, y1, x2, y2), img_bgr.shape, scale=1.6)
         face_region = img_bgr[y1:y2, x1:x2]
         
+        if face_region.size == 0:
+            print("Warning: face region is empty, skipping restoration.")
+            continue
+
         restored_patch = run_gpen_on_patch(face_region, GPEN_SESSION)
         restored_patch_matched = match_histograms(restored_patch, face_region, channel_axis=-1).astype(restored_patch.dtype)
         
