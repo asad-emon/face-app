@@ -10,8 +10,6 @@ python-multipart
 requests
 safetensors
 scikit-image
-torch
-torchvision
 uvicorn
 sqlalchemy
 psycopg2-binary
