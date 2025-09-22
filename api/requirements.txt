@@ -2,6 +2,7 @@ einops
 fastapi
 huggingface_hub
 insightface
+matplotlib
 numpy
 onnxruntime
 opencv-python-headless

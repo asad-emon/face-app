@@ -30,8 +30,6 @@ RUN pip install --no-cache-dir --upgrade pip
 COPY --chown=user . $HOME/app
 
 # Install Dependencies
-RUN pip install --no-cache-dir huggingface_hub insightface matplotlib
-
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Run the application from main entry
