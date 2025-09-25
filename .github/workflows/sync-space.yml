@@ -1,18 +1,18 @@
-    name: Sync to Hugging Face Space
+name: Sync to Hugging Face Space
 
-    on:
-      push:
-        branches:
-          - main # Or your primary branch
+on:
+  push:
+    branches:
+      - main # Or your primary branch
 
-    jobs:
-      sync:
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v4
-          - name: Push to Hugging Face Space
-            uses: huggingface/sync-action@v1.0.0
-            with:
-              hf_token: ${{ secrets.HF_TOKEN }}
-              repo_id: asadujjaman-emon/face-app
-              repo_type: space
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push to Hugging Face Space
+        uses: huggingface/hub-actions@main
+        with:
+          hf_token: ${{ secrets.HF_TOKEN }}
+          repo_id: ${{ secrets.REPO_ID }}
+          repo_type: space
