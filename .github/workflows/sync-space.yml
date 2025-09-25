@@ -1,16 +1,19 @@
-name: Sync to HF Space
+name: Sync to Hugging Face Space
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main   # or your default branch
 
 jobs:
-  sync:
+  sync-to-space:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Push to hub
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Push to Hugging Face Hub
         uses: huggingface/hub-actions@main
         with:
           repo-token: ${{ secrets.HF_TOKEN }}
-          repo_id: ${{ secrets.REPO_ID }}
+          repo-id: ${{ secrets.REPO_ID }}
