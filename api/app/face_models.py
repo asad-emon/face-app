@@ -12,6 +12,7 @@ import numpy as np
 MODEL_REPO = "asadujjaman-emon/face-app-models"
 LOCAL_MODEL_DIR = "app/models"
 DETECTION_SIZE = 320  # Set your consistent detection size here
+HF_SPACE_URL = os.environ.get("HF_SPACE_URL")
 
 # -------------------------
 # Model Downloading
@@ -47,6 +48,35 @@ def initialize_models():
     
     return face_analyzer, swapper, gpen_session
 
+
+def swap_face_with_hf_space(source_image: Image.Image, target_image: Image.Image):
+    import httpx
+    import io
+
+    if not HF_SPACE_URL:
+        raise ValueError("HF_SPACE_URL environment variable is not set.")
+
+    source_bytes = io.BytesIO()
+    target_bytes = io.BytesIO()
+    source_image.save(source_bytes, format="PNG")
+    target_image.save(target_bytes, format="PNG")
+    source_bytes.seek(0)
+    target_bytes.seek(0)
+
+    files = {
+        'source_image': ('source.png', source_bytes, 'image/png'),
+        'target_image': ('target.png', target_bytes, 'image/png')
+    }
+    
+    with httpx.Client() as client:
+        response = client.post(f"{HF_SPACE_URL}/swap", files=files)
+        response.raise_for_status()
+        image_data = response.content
+    
+    return Image.open(io.BytesIO(image_data))
+
+
 # --- Main Exported Models ---
 # These are loaded once when the application starts
-FACE_ANALYZER, SWAPPER, GPEN_SESSION = initialize_models()
+if not HF_SPACE_URL:
+    FACE_ANALYZER, SWAPPER, GPEN_SESSION = initialize_models()

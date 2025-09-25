@@ -1,0 +1,6 @@
+insightface
+onnxruntime
+gradio
+numpy
+Pillow
+huggingface_hub
