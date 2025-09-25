@@ -3,7 +3,7 @@ name: Sync to Hugging Face Space
 on:
   push:
     branches:
-      - main   # or your default branch
+      - main # or your default branch
 
 jobs:
   sync-to-space:
@@ -11,9 +11,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-
-      - name: Push to Hugging Face Hub
-        uses: huggingface/hub-actions@main
         with:
-          repo-token: ${{ secrets.HF_TOKEN }}
-          repo-id: ${{ secrets.REPO_ID }}
+          fetch-depth: 0
+          lfs: true # important if you have big files (models, datasets)
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          REPO_ID: ${{ secrets.REPO_ID }} # format: username/space-name
+        run: |
+          git remote add space https://huggingface.co/spaces/$REPO_ID
+          git push https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$REPO_ID main --force
