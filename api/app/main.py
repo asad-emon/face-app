@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from typing import List
 import io
@@ -46,7 +47,7 @@ async def get_current_user(db: Session = Depends(get_db), token: str = Depends(s
     return user
 
 @app.post("/token", response_model=schemas.Token)
-async def login_for_access_token(form_data: security.OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = crud.get_user_by_email(db, email=form_data.username)
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(

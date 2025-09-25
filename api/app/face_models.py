@@ -37,7 +37,7 @@ def hf_download(filename, repo_id=MODEL_REPO):
 # -------------------------
 def initialize_models():
     """Loads all models once and returns them."""
-    face_analyzer = FaceAnalysis(allowed_modules=['detection', 'recognition'], providers=["CPUExecutionProvider"])
+    face_analyzer = FaceAnalysis(name='buffalo_sc', allowed_modules=['detection', 'recognition'], providers=["CPUExecutionProvider"])
     face_analyzer.prepare(ctx_id=0, det_size=(DETECTION_SIZE, DETECTION_SIZE))
 
     inswapper_path = hf_download("inswapper_128.onnx")
