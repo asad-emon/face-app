@@ -152,3 +152,13 @@ def get_generated_images(
 ):
     images = crud.get_generated_images(db, owner_id=current_user.id, skip=skip, limit=limit)
     return images
+
+@app.post("/images", response_model=schemas.InputImage)
+async def upload_image(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user)
+):
+    image_data = await file.read()
+    db_image = crud.create_input_image(db=db, data=image_data, owner_id=current_user.id)
+    return db_image
