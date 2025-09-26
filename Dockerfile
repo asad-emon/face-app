@@ -21,7 +21,7 @@ ENV HOME=/home/user \
 	PATH=/home/user/.local/bin:$PATH
 
 # Set the working directory to the user's home directory
-WORKDIR $HOME/app
+WORKDIR $HOME/face-app
 
 # Try and run pip command after setting the user with `USER user` to avoid permission issues with Python
 RUN pip install --no-cache-dir --upgrade pip
