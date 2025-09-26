@@ -1,5 +1,0 @@
-# huggingface.yml
-sdk: docker
-docker:
-  build:
-    context: ./api   # <-- subfolder containing Dockerfile

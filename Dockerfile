@@ -27,7 +27,7 @@ WORKDIR $HOME/app
 RUN pip install --no-cache-dir --upgrade pip
 
 # Copy the current directory contents into the container at $HOME/app setting the owner to the user
-COPY --chown=user . $HOME/app
+COPY --chown=user ./api $HOME/face-app
 
 # Install Dependencies
 RUN pip install --no-cache-dir -r requirements.txt
