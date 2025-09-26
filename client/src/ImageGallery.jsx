@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './styles.css';
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+import { apiBaseUrl } from './utils';
 
 export default function ImageGallery({ token }) {
   const [images, setImages] = useState([]);
@@ -11,7 +10,7 @@ export default function ImageGallery({ token }) {
   const fetchImages = async () => {
     setBusy(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/images/generated/`, {
+      const response = await fetch(`${apiBaseUrl}/images/generated`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {

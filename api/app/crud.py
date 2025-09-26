@@ -24,6 +24,9 @@ def get_face_model(db: Session, model_id: int, owner_id: int) -> models.FaceMode
         models.FaceModel.id == model_id, 
         models.FaceModel.owner_id == owner_id
     ).first()
+    
+def get_face_model_list(db: Session, owner_id: int, limit: int) -> models.FaceModel:
+    return db.query(models.FaceModel).filter(models.FaceModel.owner_id == owner_id).limit(limit).all()
 
 def create_input_image(db: Session, filename: str, data: bytes, owner_id: int) -> models.InputImage:
     db_image = models.InputImage(filename=filename, data=data, owner_id=owner_id)

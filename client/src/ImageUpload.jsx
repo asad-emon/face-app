@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './styles.css';
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+import { apiBaseUrl } from './utils';
 
 export default function ImageUpload({ token }) {
   const [modelFiles, setModelFiles] = useState([]);
@@ -18,7 +17,7 @@ export default function ImageUpload({ token }) {
 
   const fetchModels = async () => {
     try {
-      const response = await fetch(`${apiBaseUrl}/models/`, {
+      const response = await fetch(`${apiBaseUrl}/models`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {
@@ -41,10 +40,10 @@ export default function ImageUpload({ token }) {
     setBusy(true);
     const formData = new FormData();
     formData.append('name', modelName);
-    modelFiles.forEach(file => formData.append('files', file));
+    modelFiles.forEach(file => formData.append('file', file));
 
     try {
-      const response = await fetch(`${apiBaseUrl}/models/generate/`, {
+      const response = await fetch(`${apiBaseUrl}/models/generate`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
@@ -76,7 +75,7 @@ export default function ImageUpload({ token }) {
       // Step 1: Upload the target image
       const imageFormData = new FormData();
       imageFormData.append('file', targetImageFile);
-      const imgResponse = await fetch(`${apiBaseUrl}/images/`, {
+      const imgResponse = await fetch(`${apiBaseUrl}/images`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: imageFormData,
@@ -116,8 +115,6 @@ export default function ImageUpload({ token }) {
         />
         <input
           type="file"
-          multiple
-          accept="image/*"
           onChange={(e) => setModelFiles(Array.from(e.target.files))}
         />
         <button onClick={handleGenerateModel} disabled={busy}>Generate Model</button>

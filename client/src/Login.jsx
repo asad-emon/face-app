@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiBaseUrl } from './utils';
 
 export default function Login({ setToken }) {
   const [email, setEmail] = useState('');
@@ -10,7 +11,7 @@ export default function Login({ setToken }) {
     e.preventDefault();
     setError('');
     try {
-      const response = await fetch('/api/token', {
+      const response = await fetch(`${apiBaseUrl}/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -33,7 +34,7 @@ export default function Login({ setToken }) {
     e.preventDefault();
     setError('');
     try {
-      const response = await fetch('/api/users/', {
+      const response = await fetch(`${apiBaseUrl}/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),

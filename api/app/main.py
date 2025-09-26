@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from typing import List
@@ -10,6 +11,7 @@ from safetensors.numpy import save as save_safetensor
 from safetensors import safe_open
 from datetime import timedelta
 from jose import JWTError, jwt
+from .utils import process_zip_file
 
 from . import crud, models, schemas, security
 from .database import SessionLocal, engine
@@ -19,7 +21,18 @@ from .face_models import FACE_ANALYZER
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+origins = [
+    "http://localhost:3000",
+    "https://face-app-93d8.onrender.com",
+]
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 def get_db():
     db = SessionLocal()
     try:
@@ -61,29 +74,22 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-@app.post("/users/", response_model=schemas.User)
+@app.post("/users", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = crud.get_user_by_email(db, email=user.email)
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     return crud.create_user(db=db, user=user)
 
-@app.post("/models/generate/", response_model=schemas.FaceModel)
+@app.post("/models/generate", response_model=schemas.FaceModel)
 async def generate_model(
-    files: List[UploadFile] = File(...),
+    file: UploadFile = File(...),
     name: str = Form(...),
     db: Session = Depends(get_db),
     current_user: schemas.User = Depends(get_current_user)
 ):
-    embeddings = []
-    for file in files:
-        image_data = await file.read()
-        image = Image.open(io.BytesIO(image_data))
-        img_np = np.array(image)
-        faces = FACE_ANALYZER.get(img_np)
-        if len(faces) > 0:
-            embeddings.append(faces[0].normed_embedding)
-
+    # Save uploaded zip and process images to get embeddings
+    embeddings = await process_zip_file(file)
     if not embeddings:
         raise HTTPException(status_code=400, detail="No faces found in the uploaded images.")
 
@@ -94,7 +100,16 @@ async def generate_model(
 
     return crud.create_face_model(db=db, name=name, data=safetensor_bytes, owner_id=current_user.id)
 
-@app.post("/swap/")
+@app.get("/models", response_model=List[schemas.FaceModel])
+async def get_models(
+    db: Session = Depends(get_db),
+    current_user: schemas.User = Depends(get_current_user),
+    limit: int = 100
+):
+    models = crud.get_face_model_list(db=db, owner_id=current_user.id, limit=limit)
+    return models
+
+@app.post("/swap")
 async def swap(
     model_id: int, 
     image_id: int, 
@@ -128,7 +143,7 @@ async def swap(
 
     return {"result": f"data:image/jpeg;base64,{base64.b64encode(img_data).decode('utf-8')}"}
 
-@app.get("/images/generated/", response_model=List[schemas.GeneratedImage])
+@app.get("/images/generated", response_model=List[schemas.GeneratedImage])
 def get_generated_images(
     skip: int = 0, 
     limit: int = 100, 
