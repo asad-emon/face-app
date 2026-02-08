@@ -4,7 +4,7 @@ import zipfile
 import io
 import numpy as np
 from PIL import Image
-from .face_models import FACE_ANALYZER
+from .face_models import get_face_analyzer
 
 async def process_zip_file(file):
     """
@@ -29,6 +29,7 @@ async def process_zip_file(file):
         image_extensions = ('.jpg', '.jpeg', '.png')
         image_files = 0
         embeddings = []
+        face_analyzer = get_face_analyzer()
         for root, _, files in os.walk(extract_folder):
             for file in files:
                 image_files += 1
@@ -37,7 +38,7 @@ async def process_zip_file(file):
                     with open(file_path, 'rb') as image_file:
                         image = Image.open(io.BytesIO(image_file.read()))
                         img_np = np.array(image)
-                        faces = FACE_ANALYZER.get(img_np)
+                        faces = face_analyzer.get(img_np)
                         if len(faces) > 0:
                             embeddings.append(faces[0].normed_embedding)
 

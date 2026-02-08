@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image
 import cv2
 from skimage.exposure import match_histograms
-from .face_models import FACE_ANALYZER, SWAPPER, GPEN_SESSION
+from .face_models import get_face_analyzer, get_gpen_session, get_swapper
 
 class DummyFace:
     def __init__(self, embedding):
@@ -12,13 +12,13 @@ class DummyFace:
 # Helper functions
 # -------------------------
 def run_gpen_on_patch(patch_bgr, gpen_session):
-    gpen_input_name = GPEN_SESSION.get_inputs()[0].name
-    gpen_output_name = GPEN_SESSION.get_outputs()[0].name
+    gpen_input_name = gpen_session.get_inputs()[0].name
+    gpen_output_name = gpen_session.get_outputs()[0].name
     h, w = patch_bgr.shape[:2]
     patch_1024 = cv2.resize(patch_bgr, (1024, 1024), interpolation=cv2.INTER_LINEAR)
     blob = patch_1024.astype(np.float32) / 127.5 - 1.0
     blob = np.transpose(blob, (2, 0, 1))[np.newaxis, :]
-    out = GPEN_SESSION.run([gpen_output_name], {gpen_input_name: blob})[0][0]
+    out = gpen_session.run([gpen_output_name], {gpen_input_name: blob})[0][0]
     out = np.transpose(out, (1, 2, 0))
     out = ((out + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
     return cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
@@ -50,7 +50,10 @@ def swap_faces(pil_img, source_embedding):
     img_rgb = np.array(pil_img)
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     
-    faces = FACE_ANALYZER.get(img_bgr)
+    face_analyzer = get_face_analyzer()
+    swapper = get_swapper()
+    gpen_session = get_gpen_session()
+    faces = face_analyzer.get(img_bgr)
 
     norm = np.linalg.norm(source_embedding)
     if norm > 0:
@@ -64,7 +67,7 @@ def swap_faces(pil_img, source_embedding):
             print("Warning: embedding not found for a face, skipping.")
             continue
         
-        img_bgr = SWAPPER.get(img_bgr, face, source_face, paste_back=True)
+        img_bgr = swapper.get(img_bgr, face, source_face, paste_back=True)
 
         x1, y1, x2, y2 = face.bbox.astype(int)
         x1, y1, x2, y2 = enlarge_box((x1, y1, x2, y2), img_bgr.shape, scale=1.6)
@@ -74,12 +77,13 @@ def swap_faces(pil_img, source_embedding):
             print("Warning: face region is empty, skipping restoration.")
             continue
 
-        restored_patch = run_gpen_on_patch(face_region, GPEN_SESSION)
-        restored_patch_matched = match_histograms(restored_patch, face_region, channel_axis=-1).astype(restored_patch.dtype)
-        
-        mask = create_feather_mask(restored_patch.shape[0], restored_patch.shape[1], feather=30)
-        
-        blended_region = restored_patch_matched.astype(np.float32) * mask + img_bgr[y1:y2, x1:x2].astype(np.float32) * (1 - mask)
-        img_bgr[y1:y2, x1:x2] = blended_region.clip(0, 255).astype(np.uint8)
+        if gpen_session is not None:
+            restored_patch = run_gpen_on_patch(face_region, gpen_session)
+            restored_patch_matched = match_histograms(restored_patch, face_region, channel_axis=-1).astype(restored_patch.dtype)
+            
+            mask = create_feather_mask(restored_patch.shape[0], restored_patch.shape[1], feather=30)
+            
+            blended_region = restored_patch_matched.astype(np.float32) * mask + img_bgr[y1:y2, x1:x2].astype(np.float32) * (1 - mask)
+            img_bgr[y1:y2, x1:x2] = blended_region.clip(0, 255).astype(np.uint8)
 
     return Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))

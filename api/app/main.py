@@ -7,7 +7,7 @@ import io
 import numpy as np
 from PIL import Image
 import base64
-from safetensors.numpy import save as save_safetensor
+from safetensors.numpy import save as save_safetensor, load as load
 from safetensors import safe_open
 from datetime import timedelta
 from jose import JWTError, jwt
@@ -16,7 +16,6 @@ from .utils import process_zip_file
 from . import crud, models, schemas, security
 from .database import SessionLocal, engine
 from .swapper import swap_faces
-from .face_models import FACE_ANALYZER
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -122,8 +121,11 @@ async def swap(
     if not model or not image:
         raise HTTPException(status_code=404, detail="Model or image not found")
 
-    with safe_open(io.BytesIO(model.data), framework="np", device="cpu") as f:
-        source_embedding = f.get_tensor("embedding")
+    tensors = load(model.data)
+    source_embedding = tensors["embedding"]
+    # stfile = 'app/models/pori-27SEP2025.safetensors'
+    # with safe_open(stfile, framework="numpy") as f:
+    #         source_embedding = f.get_tensor("embedding")
 
     input_image = Image.open(io.BytesIO(image.data))
     
@@ -160,5 +162,6 @@ async def upload_image(
     current_user: schemas.User = Depends(get_current_user)
 ):
     image_data = await file.read()
-    db_image = crud.create_input_image(db=db, data=image_data, owner_id=current_user.id)
+    filename = file.filename[:64]  # Limit filename length to 64 characters
+    db_image = crud.create_input_image(db=db, filename=filename, data=image_data, owner_id=current_user.id)
     return db_image

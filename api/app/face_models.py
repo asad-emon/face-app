@@ -1,10 +1,10 @@
 import os
+from threading import Lock
 from PIL import Image
 import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 from insightface.app import FaceAnalysis
 from insightface import model_zoo
-import numpy as np
 
 # -------------------------
 # Configuration Constants
@@ -13,6 +13,10 @@ MODEL_REPO = "asadujjaman-emon/face-app-models"
 LOCAL_MODEL_DIR = "app/models"
 DETECTION_SIZE = 320  # Set your consistent detection size here
 HF_SPACE_URL = os.environ.get("HF_SPACE_URL")
+ENABLE_GPEN = os.environ.get("ENABLE_GPEN", "1").strip().lower() in {"1", "true", "yes"}
+
+_MODEL_LOCK = Lock()
+_MODELS = None
 
 # -------------------------
 # Model Downloading
@@ -41,10 +45,12 @@ def initialize_models():
     face_analyzer.prepare(ctx_id=0, det_size=(DETECTION_SIZE, DETECTION_SIZE))
 
     inswapper_path = hf_download("inswapper_128.onnx")
-    gpen_path = hf_download("GPEN-BFR-1024.onnx")
     
     swapper = model_zoo.get_model(inswapper_path, providers=["CPUExecutionProvider"])
-    gpen_session = ort.InferenceSession(gpen_path, providers=["CPUExecutionProvider"])
+    gpen_session = None
+    if ENABLE_GPEN:
+        gpen_path = hf_download("GPEN-BFR-1024.onnx")
+        gpen_session = ort.InferenceSession(gpen_path, providers=["CPUExecutionProvider"])
     
     return face_analyzer, swapper, gpen_session
 
@@ -77,6 +83,20 @@ def swap_face_with_hf_space(source_image: Image.Image, target_image: Image.Image
 
 
 # --- Main Exported Models ---
-# These are loaded once when the application starts
-if not HF_SPACE_URL:
-    FACE_ANALYZER, SWAPPER, GPEN_SESSION = initialize_models()
+# These are loaded on first use to keep startup memory low.
+def get_models():
+    global _MODELS
+    if _MODELS is None:
+        with _MODEL_LOCK:
+            if _MODELS is None:
+                _MODELS = initialize_models()
+    return _MODELS
+
+def get_face_analyzer():
+    return get_models()[0]
+
+def get_swapper():
+    return get_models()[1]
+
+def get_gpen_session():
+    return get_models()[2]
