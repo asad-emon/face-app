@@ -1,40 +1,306 @@
-import gradio as gr
-import torch
+import os
+import io
+from threading import Lock
+from typing import List
+
 import numpy as np
+import cv2
+from skimage.exposure import match_histograms
 from PIL import Image
-import insightface
+import onnxruntime as ort
+from huggingface_hub import hf_hub_download
 from insightface.app import FaceAnalysis
-from insightface.data import get_image as ins_get_image
+from insightface import model_zoo
+from safetensors.numpy import load as load_safetensor, save as save_safetensor
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import Response
+import gradio as gr
+import httpx
 
-# Initialize the FaceAnalysis model
-app = FaceAnalysis(name='buffalo_l')
-app.prepare(ctx_id=0, det_size=(640, 640))
+# -------------------------
+# Configuration
+# -------------------------
+MODEL_REPO = os.environ.get("MODEL_REPO", "asadujjaman-emon/face-app-models")
+LOCAL_MODEL_DIR = os.environ.get("LOCAL_MODEL_DIR", "models")
+DETECTION_SIZE = int(os.environ.get("DETECTION_SIZE", "320"))
+ENABLE_GPEN = os.environ.get("ENABLE_GPEN", "1").strip().lower() in {"1", "true", "yes"}
+HF_SPACE_URL = os.environ.get("HF_SPACE_URL")
 
-# Initialize the Inswapper model
-swapper = insightface.model_zoo.get_model('inswapper_128.onnx', download=True, download_zip=True)
+_MODEL_LOCK = Lock()
+_MODELS = None
 
-def swap_faces(source_img, target_img):
-    """
-    Swaps faces from a source image to a target image.
-    """
-    # Convert Gradio images to numpy arrays
-    source_np = np.array(source_img)
-    target_np = np.array(target_img)
+# -------------------------
+# Model Downloading
+# -------------------------
 
-    # Get faces from the images
-    source_faces = app.get(source_np)
-    target_faces = app.get(target_np)
+def hf_download(filename, repo_id=MODEL_REPO):
+    """Return local path to model, downloading if needed."""
+    local_path = os.path.join(LOCAL_MODEL_DIR, filename)
+    if os.path.exists(local_path):
+        print(f"[INFO] Using pre-downloaded model: {local_path}")
+        return local_path
 
-    if not source_faces or not target_faces:
-        return None, "Could not detect faces in one or both images."
+    os.makedirs(LOCAL_MODEL_DIR, exist_ok=True)
+    print(f"[INFO] Downloading {filename} from Hugging Face...")
+    return hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        local_dir=LOCAL_MODEL_DIR,
+        local_dir_use_symlinks=False,
+    )
 
-    # Perform the swap
-    result_img = target_np.copy()
-    result_img = swapper.get(result_img, target_faces[0], source_faces[0], paste_back=True)
+# -------------------------
+# Singleton Model Loader
+# -------------------------
 
-    return Image.fromarray(result_img), "Face swap successful!"
+def initialize_models():
+    """Loads all models once and returns them."""
+    face_analyzer = FaceAnalysis(
+        name="buffalo_sc",
+        allowed_modules=["detection", "recognition"],
+        providers=["CPUExecutionProvider"],
+    )
+    face_analyzer.prepare(ctx_id=0, det_size=(DETECTION_SIZE, DETECTION_SIZE))
 
-# Create the Gradio interface
+    inswapper_path = hf_download("inswapper_128.onnx")
+    swapper = model_zoo.get_model(inswapper_path, providers=["CPUExecutionProvider"])
+
+    gpen_session = None
+    if ENABLE_GPEN:
+        gpen_path = hf_download("GPEN-BFR-1024.onnx")
+        gpen_session = ort.InferenceSession(gpen_path, providers=["CPUExecutionProvider"])
+
+    return face_analyzer, swapper, gpen_session
+
+
+def get_models():
+    global _MODELS
+    if _MODELS is None:
+        with _MODEL_LOCK:
+            if _MODELS is None:
+                _MODELS = initialize_models()
+    return _MODELS
+
+
+def get_face_analyzer():
+    return get_models()[0]
+
+
+def get_swapper():
+    return get_models()[1]
+
+
+def get_gpen_session():
+    return get_models()[2]
+
+# -------------------------
+# Swapper Logic (moved from api/app/swapper.py)
+# -------------------------
+
+class DummyFace:
+    def __init__(self, embedding):
+        self.normed_embedding = embedding
+
+
+def run_gpen_on_patch(patch_bgr, gpen_session):
+    gpen_input_name = gpen_session.get_inputs()[0].name
+    gpen_output_name = gpen_session.get_outputs()[0].name
+    h, w = patch_bgr.shape[:2]
+    patch_1024 = cv2.resize(patch_bgr, (1024, 1024), interpolation=cv2.INTER_LINEAR)
+    blob = patch_1024.astype(np.float32) / 127.5 - 1.0
+    blob = np.transpose(blob, (2, 0, 1))[np.newaxis, :]
+    out = gpen_session.run([gpen_output_name], {gpen_input_name: blob})[0][0]
+    out = np.transpose(out, (1, 2, 0))
+    out = ((out + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+    return cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
+def enlarge_box(box, image_shape, scale=1.6):
+    x1, y1, x2, y2 = box
+    w = x2 - x1
+    h = y2 - y1
+    cx = x1 + w / 2
+    cy = y1 + h / 2
+    new_w = min(image_shape[1], w * scale)
+    new_h = min(image_shape[0], h * scale)
+    nx1 = int(max(0, cx - new_w / 2))
+    ny1 = int(max(0, cy - new_h / 2))
+    nx2 = int(min(image_shape[1], cx + new_w / 2))
+    ny2 = int(min(image_shape[0], cy + new_h / 2))
+    return (nx1, ny1, nx2, ny2)
+
+
+def create_feather_mask(h, w, feather=30):
+    mask = np.zeros((h, w), dtype=np.float32)
+    cv2.ellipse(mask, (w // 2, h // 2), (w // 2 - feather, h // 2 - feather), 0, 0, 360, 1, -1)
+    mask = cv2.GaussianBlur(mask, (feather * 2 + 1, feather * 2 + 1), 0)
+    return mask[..., None]
+
+
+def swap_with_embedding(pil_img, source_embedding):
+    img_rgb = np.array(pil_img)
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+
+    face_analyzer = get_face_analyzer()
+    swapper = get_swapper()
+    gpen_session = get_gpen_session()
+
+    faces = face_analyzer.get(img_bgr)
+
+    norm = np.linalg.norm(source_embedding)
+    if norm > 0:
+        embedding = source_embedding / norm
+    else:
+        embedding = source_embedding
+    source_face = DummyFace(embedding)
+
+    for face in faces:
+        if face.normed_embedding is None:
+            print("Warning: embedding not found for a face, skipping.")
+            continue
+
+        img_bgr = swapper.get(img_bgr, face, source_face, paste_back=True)
+
+        if gpen_session is not None:
+            x1, y1, x2, y2 = face.bbox.astype(int)
+            x1, y1, x2, y2 = enlarge_box((x1, y1, x2, y2), img_bgr.shape, scale=1.6)
+            face_region = img_bgr[y1:y2, x1:x2]
+
+            if face_region.size == 0:
+                print("Warning: face region is empty, skipping restoration.")
+                continue
+
+            restored_patch = run_gpen_on_patch(face_region, gpen_session)
+            restored_patch_matched = match_histograms(restored_patch, face_region, channel_axis=-1).astype(restored_patch.dtype)
+
+            mask = create_feather_mask(restored_patch.shape[0], restored_patch.shape[1], feather=30)
+
+            blended_region = restored_patch_matched.astype(np.float32) * mask + img_bgr[y1:y2, x1:x2].astype(np.float32) * (1 - mask)
+            img_bgr[y1:y2, x1:x2] = blended_region.clip(0, 255).astype(np.uint8)
+
+    return Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+
+
+def extract_embedding(pil_img):
+    img_rgb = np.array(pil_img)
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    face_analyzer = get_face_analyzer()
+    faces = face_analyzer.get(img_bgr)
+    if not faces:
+        return None
+    return faces[0].normed_embedding
+
+def swap_with_hf_space_model(model_bytes: bytes, target_bytes: bytes) -> tuple[bytes, str]:
+    if not HF_SPACE_URL:
+        raise ValueError("HF_SPACE_URL environment variable is not set.")
+
+    model_file = io.BytesIO(model_bytes)
+    model_file.seek(0)
+    target_file = io.BytesIO(target_bytes)
+    target_file.seek(0)
+
+    files = {
+        "model_file": ("model.safetensors", model_file, "application/octet-stream"),
+        "target_image": ("target.png", target_file, "image/png"),
+    }
+
+    with httpx.Client(timeout=120.0) as client:
+        response = client.post(f"{HF_SPACE_URL}/swap-remote", files=files)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "image/jpeg")
+        return response.content, content_type
+
+# -------------------------
+# FastAPI for HF Space
+# -------------------------
+
+app = FastAPI()
+
+@app.post("/swap-remote")
+async def swap_remote(
+    model_id: str = Form(...),
+    model_file: UploadFile = File(...),
+    target_image: UploadFile = File(...),
+):
+    model_bytes = await model_file.read()
+    target_bytes = await target_image.read()
+
+    if not model_bytes:
+        raise HTTPException(status_code=400, detail="Empty model_file")
+    if not target_bytes:
+        raise HTTPException(status_code=400, detail="Empty target_image")
+
+    if HF_SPACE_URL:
+        try:
+            image_bytes, content_type = swap_with_hf_space_model(model_bytes, target_bytes)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"HF Space swap failed: {exc}")
+        return Response(content=image_bytes, media_type=content_type)
+
+    try:
+        tensors = load_safetensor(model_bytes)
+        source_embedding = tensors.get("embedding")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid model_file: {exc}")
+
+    if source_embedding is None:
+        raise HTTPException(status_code=400, detail="Model file missing 'embedding'")
+
+    try:
+        target_pil = Image.open(io.BytesIO(target_bytes))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid target_image: {exc}")
+
+    output_image = swap_with_embedding(target_pil, source_embedding)
+    buffered = io.BytesIO()
+    output_image.save(buffered, format="JPEG")
+    return Response(content=buffered.getvalue(), media_type="image/jpeg")
+
+@app.post("/embedding")
+async def create_embedding(
+    files: List[UploadFile] = File(..., alias="file"),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    embeddings = []
+    total_files = 0
+    for upload in files:
+        total_files += 1
+        data = await upload.read()
+        if not data:
+            continue
+        try:
+            image = Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception:
+            continue
+        embedding = extract_embedding(image)
+        if embedding is not None:
+            embeddings.append(embedding)
+
+    if not embeddings:
+        raise HTTPException(status_code=400, detail="No faces found in uploaded images")
+
+    avg_embedding = np.mean(embeddings, axis=0)
+    tensor_bytes = save_safetensor({"embedding": avg_embedding})
+    return Response(content=tensor_bytes, media_type="application/octet-stream")
+
+# -------------------------
+# Gradio Demo (optional)
+# -------------------------
+
+def gr_swap(source_img, target_img):
+    if source_img is None or target_img is None:
+        return None, "Please provide both source and target images."
+
+    embedding = extract_embedding(source_img)
+    if embedding is None:
+        return None, "Could not detect a face in the source image."
+
+    result_img = swap_with_embedding(target_img, embedding)
+    return result_img, "Face swap successful!"
+
+
 with gr.Blocks() as demo:
     gr.Markdown("# Face Swapper")
     with gr.Row():
@@ -46,17 +312,14 @@ with gr.Blocks() as demo:
     swap_button = gr.Button("Swap Faces")
 
     swap_button.click(
-        fn=swap_faces,
+        fn=gr_swap,
         inputs=[source_img, target_img],
-        outputs=[output_img, status_text]
+        outputs=[output_img, status_text],
     )
 
-    gr.Examples(
-        examples=[
-            ["examples/source.png", "examples/target.png"],
-        ],
-        inputs=[source_img, target_img],
-    )
+app = gr.mount_gradio_app(app, demo, path="/")
 
 if __name__ == "__main__":
-    demo.launch()
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "7860")))

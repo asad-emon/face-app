@@ -1,6 +1,11 @@
+fastapi
+uvicorn
 insightface
 onnxruntime
 gradio
 numpy
 Pillow
 huggingface_hub
+opencv-python
+scikit-image
+safetensors

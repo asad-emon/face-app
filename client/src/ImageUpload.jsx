@@ -86,7 +86,7 @@ export default function ImageUpload({ token }) {
       const imageId = imgData.id;
 
       // Step 2: Perform the swap
-      const swapResponse = await fetch(`${apiBaseUrl}/swap/?model_id=${selectedModelId}&image_id=${imageId}`, {
+      const swapResponse = await fetch(`${apiBaseUrl}/swap?model_id=${selectedModelId}&image_id=${imageId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
