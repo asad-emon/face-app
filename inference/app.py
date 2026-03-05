@@ -2,7 +2,6 @@ import os
 import io
 from threading import Lock
 from typing import List
-
 import numpy as np
 import cv2
 from skimage.exposure import match_histograms
@@ -11,10 +10,10 @@ import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 from insightface.app import FaceAnalysis
 from insightface import model_zoo
+from safetensors import safe_open
 from safetensors.numpy import load as load_safetensor, save as save_safetensor
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
-import gradio as gr
 import httpx
 
 # -------------------------
@@ -24,7 +23,6 @@ MODEL_REPO = os.environ.get("MODEL_REPO", "asadujjaman-emon/face-app-models")
 LOCAL_MODEL_DIR = os.environ.get("LOCAL_MODEL_DIR", "models")
 DETECTION_SIZE = int(os.environ.get("DETECTION_SIZE", "320"))
 ENABLE_GPEN = os.environ.get("ENABLE_GPEN", "1").strip().lower() in {"1", "true", "yes"}
-HF_SPACE_URL = os.environ.get("HF_SPACE_URL")
 
 _MODEL_LOCK = Lock()
 _MODELS = None
@@ -94,7 +92,7 @@ def get_gpen_session():
     return get_models()[2]
 
 # -------------------------
-# Swapper Logic (moved from api/app/swapper.py)
+# Swapper Logic
 # -------------------------
 
 class DummyFace:
@@ -190,26 +188,6 @@ def extract_embedding(pil_img):
         return None
     return faces[0].normed_embedding
 
-def swap_with_hf_space_model(model_bytes: bytes, target_bytes: bytes) -> tuple[bytes, str]:
-    if not HF_SPACE_URL:
-        raise ValueError("HF_SPACE_URL environment variable is not set.")
-
-    model_file = io.BytesIO(model_bytes)
-    model_file.seek(0)
-    target_file = io.BytesIO(target_bytes)
-    target_file.seek(0)
-
-    files = {
-        "model_file": ("model.safetensors", model_file, "application/octet-stream"),
-        "target_image": ("target.png", target_file, "image/png"),
-    }
-
-    with httpx.Client(timeout=120.0) as client:
-        response = client.post(f"{HF_SPACE_URL}/swap-remote", files=files)
-        response.raise_for_status()
-        content_type = response.headers.get("content-type", "image/jpeg")
-        return response.content, content_type
-
 # -------------------------
 # FastAPI for HF Space
 # -------------------------
@@ -285,41 +263,13 @@ async def create_embedding(
     tensor_bytes = save_safetensor({"embedding": avg_embedding})
     return Response(content=tensor_bytes, media_type="application/octet-stream")
 
-# -------------------------
-# Gradio Demo (optional)
-# -------------------------
-
-def gr_swap(source_img, target_img):
-    if source_img is None or target_img is None:
-        return None, "Please provide both source and target images."
-
-    embedding = extract_embedding(source_img)
-    if embedding is None:
-        return None, "Could not detect a face in the source image."
-
-    result_img = swap_with_embedding(target_img, embedding)
-    return result_img, "Face swap successful!"
-
-
-with gr.Blocks() as demo:
-    gr.Markdown("# Face Swapper")
-    with gr.Row():
-        source_img = gr.Image(label="Source Image")
-        target_img = gr.Image(label="Target Image")
-    with gr.Row():
-        output_img = gr.Image(label="Result")
-        status_text = gr.Textbox(label="Status")
-    swap_button = gr.Button("Swap Faces")
-
-    swap_button.click(
-        fn=gr_swap,
-        inputs=[source_img, target_img],
-        outputs=[output_img, status_text],
-    )
-
-app = gr.mount_gradio_app(app, demo, path="/")
-
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "7860")))
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "7860")),
+        reload=True,
+        debug=True,
+    )
