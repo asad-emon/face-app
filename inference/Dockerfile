@@ -12,18 +12,28 @@ RUN apt-get update && apt-get install -y \
 RUN useradd -m -u 1000 user
 USER user
 
+ARG MODEL_REPO=asadujjaman-emon/face-app-models
+ARG LOCAL_MODEL_DIR=models
+ARG ENABLE_GPEN=1
+
 ENV HOME=/home/user \
+    MODEL_REPO=$MODEL_REPO \
+    LOCAL_MODEL_DIR=$LOCAL_MODEL_DIR \
+    ENABLE_GPEN=$ENABLE_GPEN \
+    INSIGHTFACE_HOME=/home/user/.insightface \
     PATH=/home/user/.local/bin:$PATH
 
-WORKDIR $HOME/inference
+WORKDIR $HOME
 
 RUN pip install --no-cache-dir --upgrade pip
 
-COPY --chown=user ./inference/requirements.txt ./requirements.txt
+COPY --chown=user ./requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY --chown=user ./inference ./
+COPY --chown=user ./ ./
 
-EXPOSE 8001
+RUN python preload_models.py
 
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port 8001"]
+EXPOSE 7860
+
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port 7860"]
