@@ -1,0 +1,40 @@
+services:
+  inference:
+    build:
+      context: ./inference
+    environment:
+      PORT: "7860"
+      MODEL_REPO: "asadujjaman-emon/face-app-models"
+      LOCAL_MODEL_DIR: "models"
+      ENABLE_GPEN: "1"
+    ports:
+      - "7860:7860"
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    env_file:
+      - ./api/.env.docker
+    depends_on:
+      inference:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./client:/app
+      - /app/node_modules

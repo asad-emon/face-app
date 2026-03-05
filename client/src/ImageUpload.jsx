@@ -3,8 +3,6 @@ import './styles.css';
 import { apiBaseUrl } from './utils';
 
 export default function ImageUpload({ token }) {
-  const [modelFiles, setModelFiles] = useState([]);
-  const [modelName, setModelName] = useState('');
   const [targetImageFile, setTargetImageFile] = useState(null);
   const [models, setModels] = useState([]);
   const [selectedModelId, setSelectedModelId] = useState('');
@@ -29,37 +27,6 @@ export default function ImageUpload({ token }) {
       }
     } catch (error) {
       console.error('Failed to fetch models:', error);
-    }
-  };
-
-  const handleGenerateModel = async () => {
-    if (modelFiles.length === 0 || !modelName) {
-      alert('Please select files and provide a name for the model.');
-      return;
-    }
-    setBusy(true);
-    const formData = new FormData();
-    formData.append('name', modelName);
-    modelFiles.forEach(file => formData.append('file', file));
-
-    try {
-      const response = await fetch(`${apiBaseUrl}/models/generate`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData,
-      });
-      if (response.ok) {
-        alert('Model generated successfully!');
-        fetchModels(); // Refresh the list of models
-        setModelFiles([]);
-        setModelName('');
-      } else {
-        throw new Error('Model generation failed');
-      }
-    } catch (error) {
-      alert('Error: ' + error.message);
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -104,22 +71,6 @@ export default function ImageUpload({ token }) {
 
   return (
     <div>
-      {/* Section for generating a new model */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h2>Create a New Face Model</h2>
-        <input
-          type="text"
-          placeholder="Model Name"
-          value={modelName}
-          onChange={(e) => setModelName(e.target.value)}
-        />
-        <input
-          type="file"
-          onChange={(e) => setModelFiles(Array.from(e.target.files))}
-        />
-        <button onClick={handleGenerateModel} disabled={busy}>Generate Model</button>
-      </div>
-
       {/* Section for performing the face swap */}
       <div className="card">
         <h2>Perform Face Swap</h2>

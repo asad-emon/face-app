@@ -22,7 +22,6 @@ const app = express();
 
 const origins = [
   "http://localhost:3000",
-  "https://face-app-93d8.onrender.com",
 ];
 
 app.use(
@@ -89,6 +88,7 @@ function serializeGeneratedImage(image) {
   return {
     id: image.id,
     owner_id: image.owner_id,
+    data: image.data ? Buffer.from(image.data).toString('base64') : null,
     input_image_id: image.input_image_id,
     face_model_id: image.face_model_id,
   };
@@ -189,6 +189,30 @@ app.post(
     }
   }
 );
+
+app.post("/models/upload", requireAuth, upload.single("file"), async (req, res) => {
+  const name = (req.body.name || "").trim();
+  const file = req.file;
+
+  if (!name) {
+    return res.status(400).json({ detail: "Model name is required" });
+  }
+  if (!file) {
+    return res.status(400).json({ detail: "No file uploaded" });
+  }
+  const filename = (file.originalname || "").toLowerCase();
+  if (!filename.endsWith(".safetensor") && !filename.endsWith(".safetensors")) {
+    return res.status(400).json({ detail: "Invalid file type. Expected .safetensor or .safetensors" });
+  }
+
+  const model = await FaceModel.create({
+    name,
+    data: file.buffer,
+    owner_id: req.user.id,
+  });
+
+  return res.json(serializeFaceModel(model));
+});
 
 app.get("/models", requireAuth, async (req, res) => {
   const limit = Number(req.query.limit || 100);
