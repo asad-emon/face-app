@@ -14,7 +14,7 @@ USER user
 
 ARG MODEL_REPO=asadujjaman-emon/face-app-models
 ARG LOCAL_MODEL_DIR=models
-ARG ENABLE_GPEN=1
+ARG ENABLE_GPEN=0
 
 ENV HOME=/home/user \
     MODEL_REPO=$MODEL_REPO \
@@ -36,4 +36,4 @@ RUN python preload_models.py
 
 EXPOSE 7860
 
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port 7860"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]

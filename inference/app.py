@@ -22,7 +22,7 @@ import httpx
 MODEL_REPO = os.environ.get("MODEL_REPO", "asadujjaman-emon/face-app-models")
 LOCAL_MODEL_DIR = os.environ.get("LOCAL_MODEL_DIR", "models")
 DETECTION_SIZE = int(os.environ.get("DETECTION_SIZE", "320"))
-ENABLE_GPEN = os.environ.get("ENABLE_GPEN", "1").strip().lower() in {"1", "true", "yes"}
+ENABLE_GPEN = os.environ.get("ENABLE_GPEN", "0").strip().lower() in {"1", "true", "yes"}
 
 _MODEL_LOCK = Lock()
 _MODELS = None
@@ -207,13 +207,6 @@ async def swap_remote(
         raise HTTPException(status_code=400, detail="Empty model_file")
     if not target_bytes:
         raise HTTPException(status_code=400, detail="Empty target_image")
-
-    if HF_SPACE_URL:
-        try:
-            image_bytes, content_type = swap_with_hf_space_model(model_bytes, target_bytes)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"HF Space swap failed: {exc}")
-        return Response(content=image_bytes, media_type=content_type)
 
     try:
         tensors = load_safetensor(model_bytes)
