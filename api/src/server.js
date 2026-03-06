@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import axios from "axios";
 import FormData from "form-data";
+import { Op } from "sequelize";
 import { initDb, User, FaceModel, InputImage, GeneratedImage } from "./db.js";
 
 dotenv.config();
@@ -245,6 +246,45 @@ app.get("/images/generated", requireAuth, async (req, res) => {
     limit,
   });
   return res.json(images.map(serializeGeneratedImage));
+});
+
+app.delete("/images/generated/:id", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid image id" });
+  }
+
+  const deleted = await GeneratedImage.destroy({
+    where: { id, owner_id: req.user.id },
+  });
+
+  if (deleted === 0) {
+    return res.status(404).json({ detail: "Image not found" });
+  }
+
+  return res.json({ deleted });
+});
+
+app.delete("/images/generated", requireAuth, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+
+  if (ids.length === 0) {
+    return res.status(400).json({ detail: "ids must be a non-empty array" });
+  }
+
+  const uniqueIds = [...new Set(ids)];
+  const deleted = await GeneratedImage.destroy({
+    where: {
+      owner_id: req.user.id,
+      id: { [Op.in]: uniqueIds },
+    },
+  });
+
+  return res.json({ deleted });
 });
 
 app.post("/swap", requireAuth, async (req, res) => {
