@@ -4,6 +4,7 @@ import { apiBaseUrl } from './utils';
 
 export default function ImageGallery({ token }) {
   const [images, setImages] = useState([]);
+  const [modelsById, setModelsById] = useState({});
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -12,18 +13,35 @@ export default function ImageGallery({ token }) {
   const fetchImages = async () => {
     setBusy(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/images/generated`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setImages(data);
-        setSelectedIds((prev) => {
-          const available = new Set(data.map((image) => image.id));
-          return prev.filter((id) => available.has(id));
-        });
-      } else {
+      const [imagesResponse, modelsResponse] = await Promise.all([
+        fetch(`${apiBaseUrl}/images/generated`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        }),
+        fetch(`${apiBaseUrl}/models`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        }),
+      ]);
+
+      if (!imagesResponse.ok) {
         throw new Error('Failed to fetch images');
+      }
+
+      const imageData = await imagesResponse.json();
+      setImages(imageData);
+      setSelectedIds((prev) => {
+        const available = new Set(imageData.map((image) => image.id));
+        return prev.filter((id) => available.has(id));
+      });
+
+      if (modelsResponse.ok) {
+        const models = await modelsResponse.json();
+        const lookup = {};
+        models.forEach((model) => {
+          lookup[model.id] = model;
+        });
+        setModelsById(lookup);
+      } else {
+        setModelsById({});
       }
     } catch (error) {
       console.error('Failed to fetch images:', error);
@@ -84,6 +102,16 @@ export default function ImageGallery({ token }) {
 
   const previewIndex = images.findIndex((image) => image.id === previewId);
   const preview = previewIndex >= 0 ? images[previewIndex] : null;
+
+  const modelLabelForImage = (image) => {
+    const model = modelsById[image.face_model_id];
+    if (!model) {
+      return 'Model not found';
+    }
+    const personName = (model.person_name || model.name || '').trim() || model.name;
+    const version = model.version || 1;
+    return `${personName} v${version}`;
+  };
 
   const showPrevious = () => {
     if (images.length === 0 || previewIndex < 0) {
@@ -190,6 +218,9 @@ export default function ImageGallery({ token }) {
                 onClick={() => setPreviewId(image.id)}
                 style={{ cursor: 'pointer' }}
               />
+              <div className="muted" style={{ marginTop: 8 }}>
+                {modelLabelForImage(image)}
+              </div>
             </div>
           ))}
         </div>

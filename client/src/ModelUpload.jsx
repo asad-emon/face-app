@@ -7,10 +7,21 @@ function buildId(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
 
+function parseVersion(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const version = Number(trimmed);
+  if (!Number.isInteger(version) || version <= 0) return NaN;
+  return version;
+}
+
 export default function ModelUpload({ token }) {
   const [mode, setMode] = useState('images');
-  const [modelName, setModelName] = useState('');
+  const [personName, setPersonName] = useState('');
+  const [versionInput, setVersionInput] = useState('');
+  const [setActive, setSetActive] = useState(true);
   const [items, setItems] = useState([]);
+  const [models, setModels] = useState([]);
   const [safetensorFile, setSafetensorFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -23,10 +34,37 @@ export default function ModelUpload({ token }) {
   }, [items]);
 
   useEffect(() => {
+    fetchModels();
+  }, [token]);
+
+  useEffect(() => {
     return () => {
       itemsRef.current.forEach((item) => URL.revokeObjectURL(item.url));
     };
   }, []);
+
+  const fetchModels = async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/models`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch models');
+      }
+      const data = await response.json();
+      setModels(data || []);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const groupedModels = models.reduce((acc, model) => {
+    const key = (model.person_name || model.name || 'Unknown').trim() || 'Unknown';
+    const group = acc.get(key) || [];
+    group.push(model);
+    acc.set(key, group);
+    return acc;
+  }, new Map());
 
   const isImageName = (name) => /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(name);
   const isSafetensorName = (name) => /\.safetensors?$/i.test(name);
@@ -133,32 +171,54 @@ export default function ModelUpload({ token }) {
     }
   };
 
-  const canSubmitImages = modelName.trim() && items.length > 0 && !busy && !parsing;
-  const canSubmitSafetensor = modelName.trim() && safetensorFile && !busy;
+  const parsedVersion = parseVersion(versionInput);
+  const canSubmitVersion = parsedVersion === null || Number.isInteger(parsedVersion);
+  const canSubmitImages = personName.trim() && items.length > 0 && !busy && !parsing && canSubmitVersion;
+  const canSubmitSafetensor = personName.trim() && safetensorFile && !busy && canSubmitVersion;
+
+  const appendVersionFields = (formData) => {
+    formData.append('person_name', personName.trim());
+    formData.append('set_active', String(setActive));
+    if (parsedVersion !== null) {
+      formData.append('version', String(parsedVersion));
+    }
+  };
+
+  const resetModelInputs = () => {
+    setPersonName('');
+    setVersionInput('');
+    setSetActive(true);
+  };
 
   const handleGenerateModel = async () => {
-    if (!modelName.trim() || items.length === 0) {
-      alert('Please select images and provide a name for the model.');
+    if (!personName.trim() || items.length === 0) {
+      alert('Please select images and provide a person name.');
       return;
     }
+    if (!canSubmitVersion) {
+      alert('Version must be empty or a positive integer.');
+      return;
+    }
+
     setBusy(true);
     const formData = new FormData();
-    formData.append('name', modelName.trim());
+    appendVersionFields(formData);
     items.forEach((item) => formData.append('file', item.file));
 
     try {
       const response = await fetch(`${apiBaseUrl}/models/generate`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (response.ok) {
-        alert('Model generated successfully!');
-        clearImages();
-        setModelName('');
-      } else {
-        throw new Error('Model generation failed');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Model generation failed');
       }
+      alert('Model generated successfully!');
+      clearImages();
+      resetModelInputs();
+      await fetchModels();
     } catch (error) {
       alert('Error: ' + error.message);
     } finally {
@@ -183,28 +243,104 @@ export default function ModelUpload({ token }) {
   };
 
   const handleUploadSafetensor = async () => {
-    if (!modelName.trim() || !safetensorFile) {
-      alert('Please select a safetensors file and provide a name for the model.');
+    if (!personName.trim() || !safetensorFile) {
+      alert('Please select a safetensors file and provide a person name.');
       return;
     }
+    if (!canSubmitVersion) {
+      alert('Version must be empty or a positive integer.');
+      return;
+    }
+
     setBusy(true);
     const formData = new FormData();
-    formData.append('name', modelName.trim());
+    appendVersionFields(formData);
     formData.append('file', safetensorFile);
 
     try {
       const response = await fetch(`${apiBaseUrl}/models/upload`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (response.ok) {
-        alert('Model uploaded successfully!');
-        setSafetensorFile(null);
-        setModelName('');
-      } else {
-        throw new Error('Model upload failed');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Model upload failed');
       }
+      alert('Model uploaded successfully!');
+      setSafetensorFile(null);
+      resetModelInputs();
+      await fetchModels();
+    } catch (error) {
+      alert('Error: ' + error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleActivateModel = async (modelId) => {
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/models/${modelId}/activate`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to activate version');
+      }
+      await fetchModels();
+    } catch (error) {
+      alert('Error: ' + error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteModel = async (modelId, groupName, version) => {
+    const confirmed = window.confirm(`Delete ${groupName} v${version}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/models/${modelId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to delete version');
+      }
+      await fetchModels();
+    } catch (error) {
+      alert('Error: ' + error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeletePersonVersions = async (groupName) => {
+    const confirmed = window.confirm(`Delete all versions for ${groupName}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/models/person/${encodeURIComponent(groupName)}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to delete versions');
+      }
+      await fetchModels();
     } catch (error) {
       alert('Error: ' + error.message);
     } finally {
@@ -231,12 +367,33 @@ export default function ModelUpload({ token }) {
           Safetensors (Upload)
         </button>
       </div>
+
       <input
         type="text"
-        placeholder="Model Name"
-        value={modelName}
-        onChange={(e) => setModelName(e.target.value)}
+        placeholder="Person Name"
+        value={personName}
+        onChange={(e) => setPersonName(e.target.value)}
       />
+      <input
+        type="number"
+        min="1"
+        placeholder="Version (optional, auto-increments if empty)"
+        value={versionInput}
+        onChange={(e) => setVersionInput(e.target.value)}
+      />
+      {!canSubmitVersion && (
+        <div className="error" style={{ textAlign: 'left' }}>
+          Version must be empty or a positive integer.
+        </div>
+      )}
+      <label className="row" style={{ gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={setActive}
+          onChange={(e) => setSetActive(e.target.checked)}
+        />
+        <span>Set this version as active for inference</span>
+      </label>
 
       {mode === 'images' && (
         <>
@@ -304,6 +461,61 @@ export default function ModelUpload({ token }) {
           </button>
         </>
       )}
+
+      <div style={{ borderTop: '1px solid #2a3347', paddingTop: 12 }}>
+        <h3 style={{ margin: 0 }}>People & Versions</h3>
+        {groupedModels.size === 0 ? (
+          <div className="muted">No models uploaded yet.</div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {Array.from(groupedModels.entries()).map(([groupName, entries]) => {
+              const sorted = [...entries].sort((a, b) => (b.version || 1) - (a.version || 1));
+              return (
+                <div key={groupName} className="preview-card" style={{ gap: 8 }}>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <strong>{groupName}</strong>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="muted">{sorted.length} version{sorted.length === 1 ? '' : 's'}</span>
+                      <button
+                        type="button"
+                        className="preview-remove"
+                        disabled={busy}
+                        onClick={() => handleDeletePersonVersions(groupName)}
+                      >
+                        Delete All
+                      </button>
+                    </div>
+                  </div>
+                  {sorted.map((model) => (
+                    <div key={model.id} className="row" style={{ justifyContent: 'space-between' }}>
+                      <span>
+                        v{model.version || 1} {model.is_active ? '(Active)' : ''}
+                      </span>
+                      <div className="row" style={{ gap: 8 }}>
+                        <button
+                          type="button"
+                          disabled={busy || model.is_active}
+                          onClick={() => handleActivateModel(model.id)}
+                        >
+                          {model.is_active ? 'Selected' : 'Set for Inference'}
+                        </button>
+                        <button
+                          type="button"
+                          className="preview-remove"
+                          disabled={busy}
+                          onClick={() => handleDeleteModel(model.id, groupName, model.version || 1)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
