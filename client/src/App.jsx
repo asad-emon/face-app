@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ImageGallery from './ImageGallery';
 import ImageUpload from './ImageUpload';
 import ModelUpload from './ModelUpload';
-import Login from './Login'; // Assuming you will create this component
+import Login from './Login';
 import './styles.css';
 
 function TabButton({ active, onClick, children }) {
@@ -32,9 +32,17 @@ export default function App() {
         <TabButton active={tab === 'upload'} onClick={() => setTab('upload')}>Swap</TabButton>
         <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')}>Gallery</TabButton>
       </div>
-      {tab === 'model' && <ModelUpload token={token} />}
-      {tab === 'upload' && <ImageUpload token={token} />}
-      {tab === 'gallery' && <ImageGallery token={token} />}
+
+      <div style={{ display: tab === 'model' ? 'block' : 'none' }}>
+        <ModelUpload token={token} />
+      </div>
+      <div style={{ display: tab === 'upload' ? 'block' : 'none' }}>
+        <ImageUpload token={token} />
+      </div>
+      <div style={{ display: tab === 'gallery' ? 'block' : 'none' }}>
+        <ImageGallery token={token} isActive={tab === 'gallery'} />
+      </div>
+
       <div style={{ marginTop: 16 }} className="muted">
         A modern, database-driven face swapping application.
       </div>

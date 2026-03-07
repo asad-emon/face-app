@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './styles.css';
 import { apiBaseUrl } from './utils';
 
-export default function ImageGallery({ token }) {
+export default function ImageGallery({ token, isActive = false }) {
   const [images, setImages] = useState([]);
   const [modelsById, setModelsById] = useState({});
   const [busy, setBusy] = useState(false);
@@ -130,10 +130,10 @@ export default function ImageGallery({ token }) {
   };
 
   useEffect(() => {
-    if (token) {
+    if (token && isActive) {
       fetchImages();
     }
-  }, [token]);
+  }, [token, isActive]);
 
   useEffect(() => {
     if (!preview) {
