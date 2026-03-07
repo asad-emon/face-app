@@ -29,7 +29,7 @@ const INFERENCE_BASE_URL = process.env.INFERENCE_BASE_URL || "";
 const app = express();
 
 const origins = [
-  "http://localhost:3000",
+  process.env.CLIENT_ORIGIN,
 ];
 
 app.use(
