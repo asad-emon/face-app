@@ -31,17 +31,17 @@ jobs:
           # Clone the Space repository into a clean directory
           git clone https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$REPO_ID space-repo
 
-          # Sync inference folder from this repo into Space
-          rm -rf space-repo/inference
-          cp -R inference space-repo/inference
+          # Sync contents of inference/ into Space root
+          # (e.g., inference/app.py -> app.py in the Space repo)
+          rsync -av --delete inference/ space-repo/
 
           cd space-repo
 
           # Commit only when there are changes
           if [ -n "$(git status --porcelain)" ]; then
-            git add inference
-            git commit -m "Sync inference folder from GitHub"
+            git add -A
+            git commit -m "Sync Space root from inference/"
             git push origin main
           else
-            echo "No inference changes to sync."
+            echo "No changes to sync from inference/."
           fi
