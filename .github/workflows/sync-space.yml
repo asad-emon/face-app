@@ -26,5 +26,22 @@ jobs:
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           REPO_ID: ${{ secrets.REPO_ID }} # format: username/space-name
         run: |
-          git remote add space https://huggingface.co/spaces/$REPO_ID
-          git push https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$REPO_ID main --force
+          set -e
+
+          # Clone the Space repository into a clean directory
+          git clone https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$REPO_ID space-repo
+
+          # Sync inference folder from this repo into Space
+          rm -rf space-repo/inference
+          cp -R inference space-repo/inference
+
+          cd space-repo
+
+          # Commit only when there are changes
+          if [ -n "$(git status --porcelain)" ]; then
+            git add inference
+            git commit -m "Sync inference folder from GitHub"
+            git push origin main
+          else
+            echo "No inference changes to sync."
+          fi
