@@ -28,17 +28,20 @@ class ModelRegistry:
         if os.path.exists(local_path):
             logger.info(
                 "model_cache_hit",
-                extra={"event": "model_cache_hit", "filename": filename, "path": local_path},
+                extra={
+                    "event": "model_cache_hit",
+                    "model_filename": filename,
+                    "path": local_path,
+                },
             )
             return local_path
 
         os.makedirs(self._settings.local_model_dir, exist_ok=True)
-        with timed_log(logger, "model_download", filename=filename):
+        with timed_log(logger, "model_download", model_filename=filename):
             return hf_hub_download(
                 repo_id=self._settings.model_repo,
                 filename=filename,
                 local_dir=self._settings.local_model_dir,
-                local_dir_use_symlinks=False,
             )
 
     def _initialize_models(self) -> ModelTuple:

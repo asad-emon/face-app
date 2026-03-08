@@ -138,13 +138,57 @@ export const GeneratedImage = sequelize.define(
   }
 );
 
+export const GeneratedVideo = sequelize.define(
+  "GeneratedVideo",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
+      primaryKey: true,
+    },
+    filename: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "generated.mp4",
+    },
+    mime_type: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "video/mp4",
+    },
+    processing: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
+    data: {
+      type: DataTypes.BLOB("long"),
+      allowNull: false,
+    },
+    owner_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    face_model_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+  },
+  {
+    tableName: "generated_videos",
+    timestamps: false,
+  }
+);
+
 User.hasMany(FaceModel, { foreignKey: "owner_id" });
 User.hasMany(InputImage, { foreignKey: "owner_id" });
 User.hasMany(GeneratedImage, { foreignKey: "owner_id" });
+User.hasMany(GeneratedVideo, { foreignKey: "owner_id" });
 
 FaceModel.belongsTo(User, { foreignKey: "owner_id" });
 InputImage.belongsTo(User, { foreignKey: "owner_id" });
 GeneratedImage.belongsTo(User, { foreignKey: "owner_id" });
+GeneratedVideo.belongsTo(User, { foreignKey: "owner_id" });
 
 export async function initDb() {
   await sequelize.authenticate();
@@ -186,6 +230,37 @@ export async function initDb() {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
+    });
+  }
+
+  const generatedVideoTable = await queryInterface.describeTable("generated_videos");
+  if (!generatedVideoTable.filename) {
+    await queryInterface.addColumn("generated_videos", "filename", {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "generated.mp4",
+    });
+  }
+  if (!generatedVideoTable.mime_type) {
+    await queryInterface.addColumn("generated_videos", "mime_type", {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "video/mp4",
+    });
+  }
+  if (!generatedVideoTable.processing) {
+    await queryInterface.addColumn("generated_videos", "processing", {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    });
+    await sequelize.query("UPDATE generated_videos SET processing = false WHERE processing IS NULL");
+  }
+  if (!generatedVideoTable.face_model_id) {
+    await queryInterface.addColumn("generated_videos", "face_model_id", {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
     });
   }
 }

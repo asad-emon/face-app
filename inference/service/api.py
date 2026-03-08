@@ -1,9 +1,14 @@
 import io
+import os
+import shutil
+import subprocess
+import tempfile
 import uuid
 from time import perf_counter
 from typing import List
 
 import numpy as np
+import cv2
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image
@@ -15,6 +20,51 @@ from .observability import configure_logging, get_logger, timed_log
 
 def _parse_form_bool(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _transcode_to_h264_mp4(raw_input_path: str, output_path: str, logger) -> None:
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        shutil.copyfile(raw_input_path, output_path)
+        logger.warning(
+            "ffmpeg_not_found",
+            extra={"event": "ffmpeg_not_found", "fallback": "raw_copy"},
+        )
+        return
+
+    command = [
+        ffmpeg_bin,
+        "-y",
+        "-i",
+        raw_input_path,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-an",
+        output_path,
+    ]
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode == 0 and os.path.exists(output_path):
+        return
+
+    logger.warning(
+        "ffmpeg_transcode_failed",
+        extra={
+            "event": "ffmpeg_transcode_failed",
+            "return_code": completed.returncode,
+            "stderr_tail": (completed.stderr or "")[-500:],
+            "fallback": "raw_copy",
+        },
+    )
+    shutil.copyfile(raw_input_path, output_path)
 
 
 def create_app() -> FastAPI:
@@ -137,5 +187,135 @@ def create_app() -> FastAPI:
         avg_embedding = np.mean(embeddings, axis=0)
         tensor_bytes = save_safetensor({"embedding": avg_embedding})
         return Response(content=tensor_bytes, media_type="application/octet-stream")
+
+    @app.post("/swap-remote-video")
+    async def swap_remote_video(
+        model_id: str = Form(...),
+        enable_restore: str = Form("0"),
+        model_file: UploadFile = File(...),
+        target_video: UploadFile = File(...),
+    ):
+        del model_id
+        restore_enabled = _parse_form_bool(enable_restore)
+        model_bytes = await model_file.read()
+        target_bytes = await target_video.read()
+
+        if not model_bytes:
+            raise HTTPException(status_code=400, detail="Empty model_file")
+        if not target_bytes:
+            raise HTTPException(status_code=400, detail="Empty target_video")
+
+        try:
+            with timed_log(logger, "parse_model_file_video"):
+                tensors = load_safetensor(model_bytes)
+                source_embedding = tensors.get("embedding")
+        except Exception as exc:
+            logger.warning(
+                "invalid_model_file_video",
+                extra={"event": "invalid_model_file_video", "error": str(exc)},
+            )
+            raise HTTPException(status_code=400, detail=f"Invalid model_file: {exc}")
+
+        if source_embedding is None:
+            raise HTTPException(status_code=400, detail="Model file missing 'embedding'")
+
+        input_suffix = os.path.splitext(target_video.filename or "video.mp4")[1] or ".mp4"
+        input_path = ""
+        raw_output_path = ""
+        output_path = ""
+        cap = None
+        writer = None
+
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=input_suffix) as input_file:
+                input_file.write(target_bytes)
+                input_path = input_file.name
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as raw_output_file:
+                raw_output_path = raw_output_file.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as output_file:
+                output_path = output_file.name
+
+            with timed_log(logger, "decode_target_video"):
+                cap = cv2.VideoCapture(input_path)
+
+            if not cap.isOpened():
+                raise HTTPException(status_code=400, detail="Invalid target_video")
+
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            if width <= 0 or height <= 0:
+                raise HTTPException(status_code=400, detail="Unable to read video dimensions")
+
+            if not fps or fps <= 0:
+                fps = 25.0
+
+            writer = cv2.VideoWriter(
+                raw_output_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                fps,
+                (width, height),
+            )
+
+            if not writer.isOpened():
+                raise HTTPException(status_code=500, detail="Failed to initialize video writer")
+
+            frame_count = 0
+            with timed_log(logger, "swap_remote_video_inference", restore_enabled=restore_enabled):
+                while True:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    swapped = swap_service.swap_frame_with_embedding(
+                        frame,
+                        source_embedding,
+                        enable_restore=restore_enabled,
+                    )
+                    writer.write(swapped)
+                    frame_count += 1
+
+            if frame_count == 0:
+                raise HTTPException(status_code=400, detail="Video has no readable frames")
+
+            writer.release()
+            writer = None
+
+            with timed_log(logger, "transcode_output_video", frame_count=frame_count):
+                _transcode_to_h264_mp4(raw_output_path, output_path, logger)
+
+            with timed_log(logger, "encode_output_video", frame_count=frame_count):
+                with open(output_path, "rb") as file_obj:
+                    output_bytes = file_obj.read()
+
+            logger.info(
+                "video_encoded",
+                extra={
+                    "event": "video_encoded",
+                    "output_path": output_path,
+                    "frame_count": frame_count,
+                },
+            )
+            return Response(content=output_bytes, media_type="video/mp4")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "swap_remote_video_failed",
+                extra={"event": "swap_remote_video_failed", "error": str(exc)},
+            )
+            raise HTTPException(status_code=500, detail=f"Video swap failed: {exc}")
+        finally:
+            if cap is not None:
+                cap.release()
+            if writer is not None:
+                writer.release()
+            if input_path and os.path.exists(input_path):
+                os.remove(input_path)
+            if raw_output_path and os.path.exists(raw_output_path):
+                os.remove(raw_output_path)
+            if output_path and os.path.exists(output_path):
+                os.remove(output_path)
 
     return app

@@ -34,6 +34,11 @@ export default function ImageUpload({ token }) {
   const [selectedModelId, setSelectedModelId] = useState('');
   const [enableRestore, setEnableRestore] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState('');
+  const [videoResultUrl, setVideoResultUrl] = useState('');
+  const [videoBusy, setVideoBusy] = useState(false);
+  const [videoError, setVideoError] = useState('');
   const targetImagesRef = useRef([]);
 
   useEffect(() => {
@@ -47,8 +52,14 @@ export default function ImageUpload({ token }) {
   useEffect(() => {
     return () => {
       targetImagesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      if (videoPreviewUrl) {
+        URL.revokeObjectURL(videoPreviewUrl);
+      }
+      if (videoResultUrl) {
+        URL.revokeObjectURL(videoResultUrl);
+      }
     };
-  }, []);
+  }, [videoPreviewUrl, videoResultUrl]);
 
   const modelGroups = groupByPerson(models);
   const selectedGroup = modelGroups.find((group) => group.personName === selectedPerson) || null;
@@ -134,6 +145,24 @@ export default function ImageUpload({ token }) {
     });
   };
 
+  const setVideoSelection = (file) => {
+    if (videoPreviewUrl) {
+      URL.revokeObjectURL(videoPreviewUrl);
+    }
+    if (videoResultUrl) {
+      URL.revokeObjectURL(videoResultUrl);
+      setVideoResultUrl('');
+    }
+    setVideoError('');
+    if (!file) {
+      setVideoFile(null);
+      setVideoPreviewUrl('');
+      return;
+    }
+    setVideoFile(file);
+    setVideoPreviewUrl(URL.createObjectURL(file));
+  };
+
   const handleSwap = async () => {
     if (!selectedModelId || targetImages.length === 0) {
       alert('Please select a person/version and at least one target image.');
@@ -198,11 +227,54 @@ export default function ImageUpload({ token }) {
     }
   };
 
+  const handleVideoSwap = async () => {
+    if (!selectedModelId) {
+      alert('Please select a person/version first.');
+      return;
+    }
+    if (!videoFile) {
+      alert('Please select a target video first.');
+      return;
+    }
+
+    setVideoBusy(true);
+    setVideoError('');
+
+    try {
+      const formData = new FormData();
+      formData.append('file', videoFile);
+      formData.append('model_id', selectedModelId);
+      formData.append('enable_restore', enableRestore ? '1' : '0');
+
+      const response = await fetch(`${apiBaseUrl}/swap-video`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Video face swap failed');
+      }
+
+      const outputBlob = await response.blob();
+      if (videoResultUrl) {
+        URL.revokeObjectURL(videoResultUrl);
+      }
+      setVideoResultUrl(URL.createObjectURL(outputBlob));
+    } catch (error) {
+      setVideoError(error.message || 'Unknown error');
+    } finally {
+      setVideoBusy(false);
+    }
+  };
+
   const processedCount = targetImages.filter((item) => item.status === 'done').length;
   const failedCount = targetImages.filter((item) => item.status === 'failed').length;
   const pendingCount = targetImages.filter(
     (item) => item.status === 'idle' || item.status === 'uploading' || item.status === 'swapping'
   ).length;
+  const controlsDisabled = busy || videoBusy;
 
   const statusText = (status) => {
     if (status === 'uploading') return 'Uploading';
@@ -221,7 +293,7 @@ export default function ImageUpload({ token }) {
         <select
           value={selectedPerson}
           onChange={(e) => handlePersonChange(e.target.value)}
-          disabled={modelGroups.length === 0 || busy}
+          disabled={modelGroups.length === 0 || controlsDisabled}
         >
           <option value="" disabled>Select a person</option>
           {modelGroups.map((group) => (
@@ -233,7 +305,7 @@ export default function ImageUpload({ token }) {
         <select
           value={selectedModelId}
           onChange={(e) => setSelectedModelId(e.target.value)}
-          disabled={!selectedGroup || busy}
+          disabled={!selectedGroup || controlsDisabled}
         >
           <option value="" disabled>Select a version</option>
           {(selectedGroup?.versions || []).map((model) => (
@@ -248,7 +320,7 @@ export default function ImageUpload({ token }) {
             type="checkbox"
             checked={enableRestore}
             onChange={(e) => setEnableRestore(e.target.checked)}
-            disabled={busy}
+            disabled={controlsDisabled}
           />
           <span>Enable face restore (slower, better quality)</span>
         </label>
@@ -257,10 +329,11 @@ export default function ImageUpload({ token }) {
           type="file"
           accept="image/*"
           multiple
-          onChange={(e) => {
-            addFiles(e.target.files);
-            e.target.value = '';
-          }}
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = '';
+            }}
+          disabled={controlsDisabled}
         />
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <div className="muted">
@@ -275,7 +348,7 @@ export default function ImageUpload({ token }) {
             </button>
             <button
               onClick={handleSwap}
-              disabled={busy || !selectedModelId || targetImages.length === 0}
+              disabled={controlsDisabled || !selectedModelId || targetImages.length === 0}
             >
               Process Images
             </button>
@@ -309,9 +382,45 @@ export default function ImageUpload({ token }) {
             ))}
           </div>
         )}
+
+        <hr style={{ margin: '16px 0', borderColor: '#ddd' }} />
+        <h3>Video Face Swap</h3>
+        <p className="muted">Upload one target video and run swap with the selected model version.</p>
+        <input
+          type="file"
+          accept="video/*"
+          onChange={(e) => {
+            const file = e.target.files?.[0] || null;
+            setVideoSelection(file);
+            e.target.value = '';
+          }}
+          disabled={controlsDisabled}
+        />
+        <div className="row" style={{ marginTop: 8, gap: 8 }}>
+          <button onClick={handleVideoSwap} disabled={controlsDisabled || !selectedModelId || !videoFile}>
+            Process Video
+          </button>
+          <button onClick={() => setVideoSelection(null)} disabled={controlsDisabled || !videoFile}>
+            Clear Video
+          </button>
+        </div>
+        {videoError && <div className="error" style={{ marginTop: 8 }}>{videoError}</div>}
+        {videoPreviewUrl && (
+          <div style={{ marginTop: 12 }}>
+            <div className="muted">Input video</div>
+            <video src={videoPreviewUrl} controls className="preview-img" />
+          </div>
+        )}
+        {videoResultUrl && (
+          <div style={{ marginTop: 12 }}>
+            <div className="muted">Swapped video</div>
+            <video src={videoResultUrl} controls className="preview-img" />
+          </div>
+        )}
       </div>
 
       {busy && <p>Processing queued images...</p>}
+      {videoBusy && <p>Processing video...</p>}
     </div>
   );
 }

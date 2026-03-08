@@ -14,6 +14,7 @@ import {
   FaceModel,
   InputImage,
   GeneratedImage,
+  GeneratedVideo,
 } from "./db.js";
 
 dotenv.config();
@@ -45,11 +46,29 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 200 * 1024 * 1024 },
 });
 
 function logApiError(context, err) {
-  const detail = err?.response?.data?.detail || err?.response?.data || err?.message || err;
+  const responseData = err?.response?.data;
+  let detail = err?.message || err;
+
+  if (responseData?.detail) {
+    detail = responseData.detail;
+  } else if (Buffer.isBuffer(responseData)) {
+    const rawText = responseData.toString("utf8");
+    try {
+      const parsed = JSON.parse(rawText);
+      detail = parsed?.detail || rawText;
+    } catch {
+      detail = rawText;
+    }
+  } else if (typeof responseData === "string") {
+    detail = responseData;
+  } else if (responseData) {
+    detail = responseData;
+  }
+
   console.error(`[ERROR] ${context}:`, detail);
   if (err?.stack) {
     console.error(err.stack);
@@ -117,6 +136,19 @@ function serializeGeneratedImage(image) {
     data: image.data ? Buffer.from(image.data).toString('base64') : null,
     input_image_id: image.input_image_id,
     face_model_id: image.face_model_id,
+  };
+}
+
+function serializeGeneratedVideo(video) {
+  const hasBinaryData = Boolean(video.data && Buffer.from(video.data).length > 0);
+  return {
+    id: video.id,
+    owner_id: video.owner_id,
+    face_model_id: video.face_model_id,
+    filename: video.filename,
+    mime_type: video.mime_type || "video/mp4",
+    processing: Boolean(video.processing),
+    has_content: hasBinaryData,
   };
 }
 
@@ -669,6 +701,112 @@ app.delete("/images/generated", requireAuth, async (req, res) => {
   return res.json({ deleted });
 });
 
+app.get("/videos/generated", requireAuth, async (req, res) => {
+  const skip = Number(req.query.skip || 0);
+  const limit = Number(req.query.limit || 100);
+  const videos = await GeneratedVideo.findAll({
+    where: { owner_id: req.user.id },
+    order: [["id", "DESC"]],
+    offset: skip,
+    limit,
+  });
+  return res.json(videos.map(serializeGeneratedVideo));
+});
+
+app.get("/videos/generated/:id/content", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid video id" });
+  }
+
+  const video = await GeneratedVideo.findOne({
+    where: { id, owner_id: req.user.id },
+  });
+  if (!video) {
+    return res.status(404).json({ detail: "Video not found" });
+  }
+  if (video.processing) {
+    return res.status(409).json({ detail: "Video is still processing" });
+  }
+  if (!video.data || Buffer.from(video.data).length === 0) {
+    return res.status(404).json({ detail: "Video content is not available" });
+  }
+
+  const filename = video.filename || `generated-${video.id}.mp4`;
+  const mimeType = video.mime_type || "video/mp4";
+  const fullBuffer = Buffer.from(video.data);
+  const total = fullBuffer.length;
+  const range = req.headers.range;
+
+  res.setHeader("Content-Type", mimeType);
+  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+
+  if (!range) {
+    res.setHeader("Content-Length", String(total));
+    return res.send(fullBuffer);
+  }
+
+  const match = /bytes=(\d*)-(\d*)/.exec(range);
+  if (!match) {
+    res.setHeader("Content-Range", `bytes */${total}`);
+    return res.status(416).end();
+  }
+
+  const start = match[1] ? Number(match[1]) : 0;
+  const end = match[2] ? Number(match[2]) : total - 1;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > end || end >= total) {
+    res.setHeader("Content-Range", `bytes */${total}`);
+    return res.status(416).end();
+  }
+
+  const chunk = fullBuffer.subarray(start, end + 1);
+  res.status(206);
+  res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+  res.setHeader("Content-Length", String(chunk.length));
+  return res.send(chunk);
+});
+
+app.delete("/videos/generated/:id", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid video id" });
+  }
+
+  const deleted = await GeneratedVideo.destroy({
+    where: { id, owner_id: req.user.id },
+  });
+
+  if (deleted === 0) {
+    return res.status(404).json({ detail: "Video not found" });
+  }
+
+  return res.json({ deleted });
+});
+
+app.delete("/videos/generated", requireAuth, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+
+  if (ids.length === 0) {
+    return res.status(400).json({ detail: "ids must be a non-empty array" });
+  }
+
+  const uniqueIds = [...new Set(ids)];
+  const deleted = await GeneratedVideo.destroy({
+    where: {
+      owner_id: req.user.id,
+      id: { [Op.in]: uniqueIds },
+    },
+  });
+
+  return res.json({ deleted });
+});
+
 app.post("/swap", requireAuth, async (req, res) => {
   const modelId = Number(req.query.model_id || req.body.model_id);
   const imageId = Number(req.query.image_id || req.body.image_id);
@@ -739,6 +877,99 @@ app.post("/swap", requireAuth, async (req, res) => {
     logApiError("POST /swap", err);
     const detail = err.response?.data?.detail || err.message;
     return res.status(502).json({ detail: `Swap service failed: ${detail}` });
+  }
+});
+
+app.post("/swap-video", requireAuth, upload.single("file"), async (req, res) => {
+  const modelId = Number(req.query.model_id || req.body.model_id);
+  const enableRestore = parseBoolean(
+    req.query.enable_restore ?? req.body.enable_restore,
+    false
+  );
+  const video = req.file;
+
+  if (!modelId) {
+    return res.status(400).json({ detail: "model_id is required" });
+  }
+  if (!video) {
+    return res.status(400).json({ detail: "No video uploaded" });
+  }
+
+  const model = await FaceModel.findOne({
+    where: { id: modelId, owner_id: req.user.id, is_deleted: false },
+  });
+  if (!model) {
+    return res.status(404).json({ detail: "Model not found" });
+  }
+
+  if (!INFERENCE_BASE_URL) {
+    return res
+      .status(500)
+      .json({ detail: "INFERENCE_BASE_URL is not configured" });
+  }
+
+  let generatedVideo = null;
+  try {
+    generatedVideo = await GeneratedVideo.create({
+      filename: video.originalname || "target.mp4",
+      mime_type: video.mimetype || "video/mp4",
+      processing: true,
+      data: Buffer.alloc(0),
+      owner_id: req.user.id,
+      face_model_id: modelId,
+    });
+
+    const form = new FormData();
+    form.append("model_id", String(modelId));
+    form.append("enable_restore", enableRestore ? "1" : "0");
+    form.append("model_file", model.data, {
+      filename: "model.safetensors",
+      contentType: "application/octet-stream",
+    });
+    form.append("target_video", video.buffer, {
+      filename: video.originalname || "target.mp4",
+      contentType: video.mimetype || "video/mp4",
+    });
+
+    const response = await axios.post(
+      `${INFERENCE_BASE_URL}/swap-remote-video`,
+      form,
+      {
+        headers: form.getHeaders(),
+        responseType: "arraybuffer",
+        timeout: 1800000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      }
+    );
+
+    const outputBytes = Buffer.from(response.data);
+    const generatedFilename = `swapped-${Date.now()}.mp4`;
+    await generatedVideo.update({
+      filename: generatedFilename,
+      mime_type: "video/mp4",
+      processing: false,
+      data: outputBytes,
+    });
+
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${generatedFilename}"`
+    );
+    res.setHeader("x-generated-video-id", String(generatedVideo.id));
+    res.setHeader("x-processing", "false");
+    return res.send(outputBytes);
+  } catch (err) {
+    if (generatedVideo) {
+      await GeneratedVideo.update(
+        { processing: false },
+        { where: { id: generatedVideo.id, owner_id: req.user.id } }
+      );
+    }
+    logApiError("POST /swap-video", err);
+    const detail = err.response?.data?.detail || err.message;
+    return res.status(502).json({ detail: `Video swap service failed: ${detail}` });
   }
 });
 

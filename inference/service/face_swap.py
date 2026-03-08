@@ -91,6 +91,22 @@ class FaceSwapService:
         img_rgb = np.array(pil_img)
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
+        swapped_bgr = self.swap_frame_with_embedding(
+            img_bgr,
+            source_embedding,
+            enable_restore=enable_restore,
+        )
+
+        return Image.fromarray(cv2.cvtColor(swapped_bgr, cv2.COLOR_BGR2RGB))
+
+    def swap_frame_with_embedding(
+        self,
+        img_bgr: np.ndarray,
+        source_embedding: np.ndarray,
+        enable_restore: bool = False,
+    ) -> np.ndarray:
+        img_bgr = np.ascontiguousarray(img_bgr)
+
         self._registry.prepare_face_analyzer_for_image(img_bgr.shape)
         face_analyzer = self._registry.get_face_analyzer()
         swapper = self._registry.get_swapper()
@@ -163,5 +179,4 @@ class FaceSwapService:
                 "skipped_faces": skipped_faces,
             },
         )
-
-        return Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+        return img_bgr

@@ -2,12 +2,15 @@ services:
   inference:
     build:
       context: ./inference
+      dockerfile: Dockerfile.dev
     environment:
       PORT: "7860"
       MODEL_REPO: "asadujjaman-emon/face-app-models"
       LOCAL_MODEL_DIR: "models"
     ports:
       - "7860:7860"
+    volumes:
+      - ./inference:/workspace
 
   api:
     build:
