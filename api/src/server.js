@@ -148,6 +148,23 @@ function parseSetActive(rawValue) {
   return true;
 }
 
+function parseBoolean(rawValue, defaultValue = false) {
+  if (rawValue === undefined || rawValue === null || rawValue === "") {
+    return defaultValue;
+  }
+  if (typeof rawValue === "boolean") {
+    return rawValue;
+  }
+  const value = String(rawValue).toLowerCase();
+  if (value === "true" || value === "1" || value === "yes" || value === "on") {
+    return true;
+  }
+  if (value === "false" || value === "0" || value === "no" || value === "off") {
+    return false;
+  }
+  return defaultValue;
+}
+
 async function resolveVersion(ownerId, personName, requestedVersion, transaction) {
   if (requestedVersion !== null) {
     return requestedVersion;
@@ -655,6 +672,10 @@ app.delete("/images/generated", requireAuth, async (req, res) => {
 app.post("/swap", requireAuth, async (req, res) => {
   const modelId = Number(req.query.model_id || req.body.model_id);
   const imageId = Number(req.query.image_id || req.body.image_id);
+  const enableRestore = parseBoolean(
+    req.query.enable_restore ?? req.body.enable_restore,
+    false
+  );
 
   if (!modelId || !imageId) {
     return res
@@ -682,6 +703,7 @@ app.post("/swap", requireAuth, async (req, res) => {
   try {
     const form = new FormData();
     form.append("model_id", String(modelId));
+    form.append("enable_restore", enableRestore ? "1" : "0");
     form.append("model_file", model.data, {
       filename: "model.safetensors",
       contentType: "application/octet-stream",

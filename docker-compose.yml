@@ -6,7 +6,6 @@ services:
       PORT: "7860"
       MODEL_REPO: "asadujjaman-emon/face-app-models"
       LOCAL_MODEL_DIR: "models"
-      ENABLE_GPEN: "0"
     ports:
       - "7860:7860"
 

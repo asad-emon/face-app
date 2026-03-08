@@ -7,10 +7,12 @@ from huggingface_hub import hf_hub_download
 from insightface import model_zoo
 from insightface.app import FaceAnalysis
 
+from .observability import get_logger, timed_log
 from .settings import Settings, get_settings
 
 
-ModelTuple = Tuple[FaceAnalysis, object, Optional[ort.InferenceSession]]
+ModelTuple = Tuple[FaceAnalysis, object]
+logger = get_logger("inference.model_registry")
 
 
 class ModelRegistry:
@@ -18,55 +20,53 @@ class ModelRegistry:
         self._settings = settings
         self._lock = Lock()
         self._models: Optional[ModelTuple] = None
+        self._gpen_session: Optional[ort.InferenceSession] = None
         self._current_det_size: Optional[int] = None
 
     def _download_model(self, filename: str) -> str:
         local_path = os.path.join(self._settings.local_model_dir, filename)
         if os.path.exists(local_path):
-            print(f"[INFO] Using pre-downloaded model: {local_path}")
+            logger.info(
+                "model_cache_hit",
+                extra={"event": "model_cache_hit", "filename": filename, "path": local_path},
+            )
             return local_path
 
         os.makedirs(self._settings.local_model_dir, exist_ok=True)
-        print(f"[INFO] Downloading {filename} from Hugging Face...")
-        return hf_hub_download(
-            repo_id=self._settings.model_repo,
-            filename=filename,
-            local_dir=self._settings.local_model_dir,
-            local_dir_use_symlinks=False,
-        )
+        with timed_log(logger, "model_download", filename=filename):
+            return hf_hub_download(
+                repo_id=self._settings.model_repo,
+                filename=filename,
+                local_dir=self._settings.local_model_dir,
+                local_dir_use_symlinks=False,
+            )
 
     def _initialize_models(self) -> ModelTuple:
-        face_analyzer = FaceAnalysis(
-            name="buffalo_sc",
-            allowed_modules=["detection", "recognition"],
-            providers=["CPUExecutionProvider"],
-        )
-        initial_det_size = self._settings.detection_size_min
-        face_analyzer.prepare(
-            ctx_id=0,
-            det_size=(initial_det_size, initial_det_size),
-        )
-        self._current_det_size = initial_det_size
+        with timed_log(logger, "model_initialize"):
+            face_analyzer = FaceAnalysis(
+                name="buffalo_sc",
+                allowed_modules=["detection", "recognition"],
+                providers=["CPUExecutionProvider"],
+            )
+            initial_det_size = self._settings.detection_size_min
+            face_analyzer.prepare(
+                ctx_id=0,
+                det_size=(initial_det_size, initial_det_size),
+            )
+            self._current_det_size = initial_det_size
 
-        inswapper_path = self._download_model("inswapper_128.onnx")
-        swapper = model_zoo.get_model(
-            inswapper_path,
-            providers=["CPUExecutionProvider"],
-        )
-
-        gpen_session = None
-        if self._settings.enable_gpen:
-            gpen_path = self._download_model("GPEN-BFR-1024.onnx")
-            gpen_session = ort.InferenceSession(
-                gpen_path,
+            inswapper_path = self._download_model("inswapper_128.onnx")
+            swapper = model_zoo.get_model(
+                inswapper_path,
                 providers=["CPUExecutionProvider"],
             )
 
-        return face_analyzer, swapper, gpen_session
+            return face_analyzer, swapper
 
     def preload_assets(self) -> None:
         self.get_models()
-        print("[INFO] Preload complete.")
+        self.get_gpen_session()
+        logger.info("preload_complete", extra={"event": "preload_complete"})
 
     def get_models(self) -> ModelTuple:
         if self._models is None:
@@ -93,12 +93,25 @@ class ModelRegistry:
                 det_size=(det_size, det_size),
             )
             self._current_det_size = det_size
+            logger.info(
+                "detector_prepared",
+                extra={"event": "detector_prepared", "detection_size": det_size},
+            )
 
     def get_swapper(self):
         return self.get_models()[1]
 
     def get_gpen_session(self) -> Optional[ort.InferenceSession]:
-        return self.get_models()[2]
+        if self._gpen_session is None:
+            with self._lock:
+                if self._gpen_session is None:
+                    with timed_log(logger, "gpen_initialize"):
+                        gpen_path = self._download_model("GPEN-BFR-1024.onnx")
+                        self._gpen_session = ort.InferenceSession(
+                            gpen_path,
+                            providers=["CPUExecutionProvider"],
+                        )
+        return self._gpen_session
 
 
 _REGISTRY: Optional[ModelRegistry] = None

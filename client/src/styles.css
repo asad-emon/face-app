@@ -114,6 +114,19 @@ input[type="file"] {
     cursor: pointer;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cdd5e1;
+  font-size: 0.95rem;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  accent-color: #8bb6ff;
+}
+
 /* Login Page */
 .login-container {
   max-width: 400px;

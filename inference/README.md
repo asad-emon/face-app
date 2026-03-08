@@ -5,8 +5,6 @@ emoji: 💻
 colorFrom: pink
 colorTo: gray
 sdk: docker
-build_args:
-  ENABLE_GPEN: 1
 pinned: true
 license: unknown
 short_description: face swap application

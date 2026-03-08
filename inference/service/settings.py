@@ -3,11 +3,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 
-def _env_bool(name: str, default: str = "0") -> bool:
-    value = os.environ.get(name, default).strip().lower()
-    return value in {"1", "true", "yes"}
-
-
 @dataclass(frozen=True)
 class Settings:
     model_repo: str
@@ -16,7 +11,6 @@ class Settings:
     detection_size_max: int
     detection_size_ratio: float
     detection_size_step: int
-    enable_gpen: bool
     port: int
 
     def detection_size_for_image(self, width: int, height: int) -> int:
@@ -42,6 +36,5 @@ def get_settings() -> Settings:
         detection_size_max=int(os.environ.get("DETECTION_SIZE_MAX", default_max)),
         detection_size_ratio=float(os.environ.get("DETECTION_SIZE_RATIO", "0.5")),
         detection_size_step=int(os.environ.get("DETECTION_SIZE_STEP", "32")),
-        enable_gpen=_env_bool("ENABLE_GPEN", "0"),
         port=int(os.environ.get("PORT", "7860")),
     )

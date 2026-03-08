@@ -32,6 +32,7 @@ export default function ImageUpload({ token }) {
   const [models, setModels] = useState([]);
   const [selectedPerson, setSelectedPerson] = useState('');
   const [selectedModelId, setSelectedModelId] = useState('');
+  const [enableRestore, setEnableRestore] = useState(false);
   const [busy, setBusy] = useState(false);
   const targetImagesRef = useRef([]);
 
@@ -167,7 +168,7 @@ export default function ImageUpload({ token }) {
 
           updateImageItem(item.id, { status: 'swapping', imageId });
           const swapResponse = await fetch(
-            `${apiBaseUrl}/swap?model_id=${selectedModelId}&image_id=${imageId}`,
+            `${apiBaseUrl}/swap?model_id=${selectedModelId}&image_id=${imageId}&enable_restore=${enableRestore ? '1' : '0'}`,
             {
               method: 'POST',
               headers: { Authorization: `Bearer ${token}` },
@@ -241,6 +242,16 @@ export default function ImageUpload({ token }) {
             </option>
           ))}
         </select>
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={enableRestore}
+            onChange={(e) => setEnableRestore(e.target.checked)}
+            disabled={busy}
+          />
+          <span>Enable face restore (slower, better quality)</span>
+        </label>
 
         <input
           type="file"

@@ -14,12 +14,10 @@ USER user
 
 ARG MODEL_REPO=asadujjaman-emon/face-app-models
 ARG LOCAL_MODEL_DIR=models
-ARG ENABLE_GPEN=0
 
 ENV HOME=/home/user \
     MODEL_REPO=$MODEL_REPO \
     LOCAL_MODEL_DIR=$LOCAL_MODEL_DIR \
-    ENABLE_GPEN=$ENABLE_GPEN \
     INSIGHTFACE_HOME=/home/user/.insightface \
     PATH=/home/user/.local/bin:$PATH
 
