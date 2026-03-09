@@ -4,7 +4,7 @@ import { apiBaseUrl } from './utils';
 
 let nextLocalId = 1;
 const INPUT_PAGE_SIZE = 12;
-const PAGE_SIZE_OPTIONS = [8, 12, 24, 48];
+const PAGE_SIZE_OPTIONS = [8, 12, 24, 48, 96];
 
 function groupByPerson(models) {
   const groups = new Map();
@@ -29,6 +29,10 @@ function getDefaultVersionId(versions) {
   return String((active || versions[0]).id);
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function ImageUpload({ token }) {
   const [targetImages, setTargetImages] = useState([]);
   const [models, setModels] = useState([]);
@@ -49,6 +53,14 @@ export default function ImageUpload({ token }) {
   const [inputGalleryBusy, setInputGalleryBusy] = useState(false);
   const [reInferenceBusy, setReInferenceBusy] = useState(false);
   const [inputDeleteBusy, setInputDeleteBusy] = useState(false);
+  const [reInferenceProgress, setReInferenceProgress] = useState({
+    total: 0,
+    completed: 0,
+    success: 0,
+    failed: 0,
+    currentImageId: null,
+  });
+  const [inputImageJobStatus, setInputImageJobStatus] = useState({});
   const targetImagesRef = useRef([]);
 
   useEffect(() => {
@@ -284,30 +296,103 @@ export default function ImageUpload({ token }) {
       return;
     }
 
+    const queue = [...selectedInputImageIds];
     setReInferenceBusy(true);
+    setReInferenceProgress({
+      total: queue.length,
+      completed: 0,
+      success: 0,
+      failed: 0,
+      currentImageId: null,
+    });
+    setInputImageJobStatus((prev) => {
+      const next = { ...prev };
+      queue.forEach((id) => {
+        next[id] = 'queued';
+      });
+      return next;
+    });
+
     let success = 0;
     let failed = 0;
     try {
-      for (const imageId of selectedInputImageIds) {
-        try {
-          const response = await fetch(
-            `${apiBaseUrl}/swap?model_id=${selectedModelId}&image_id=${imageId}&enable_restore=${enableRestore ? '1' : '0'}`,
-            {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => null);
-            throw new Error(errorData?.detail || 'Face swap failed');
+      const createResponse = await fetch(`${apiBaseUrl}/swap-jobs`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model_id: Number(selectedModelId),
+          image_ids: queue,
+          enable_restore: enableRestore,
+        }),
+      });
+      if (!createResponse.ok) {
+        const errorData = await createResponse.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to enqueue re-inference jobs');
+      }
+      const createData = await createResponse.json();
+      const jobs = Array.isArray(createData?.items) ? createData.items : [];
+      const jobIds = jobs.map((job) => Number(job.id)).filter((id) => Number.isInteger(id) && id > 0);
+      if (jobIds.length === 0) {
+        throw new Error('No jobs were created');
+      }
+
+      let done = false;
+      while (!done) {
+        const pollResponse = await fetch(`${apiBaseUrl}/swap-jobs?ids=${jobIds.join(',')}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!pollResponse.ok) {
+          const errorData = await pollResponse.json().catch(() => null);
+          throw new Error(errorData?.detail || 'Failed to poll re-inference jobs');
+        }
+        const pollData = await pollResponse.json();
+        const polledJobs = Array.isArray(pollData?.items) ? pollData.items : [];
+
+        let completed = 0;
+        success = 0;
+        failed = 0;
+        let currentImageId = null;
+        const nextJobStatus = {};
+        polledJobs.forEach((job) => {
+          const status = String(job?.status || 'queued');
+          const imageId = Number(job?.input_image_id);
+          if (Number.isInteger(imageId) && imageId > 0) {
+            nextJobStatus[imageId] = status;
           }
-          success += 1;
-        } catch (_error) {
-          failed += 1;
+          if (status === 'done') {
+            completed += 1;
+            success += 1;
+          } else if (status === 'failed') {
+            completed += 1;
+            failed += 1;
+          } else if (!currentImageId && status === 'processing' && Number.isInteger(imageId) && imageId > 0) {
+            currentImageId = imageId;
+          }
+        });
+        setInputImageJobStatus((prev) => ({ ...prev, ...nextJobStatus }));
+        setReInferenceProgress({
+          total: jobIds.length,
+          completed,
+          success,
+          failed,
+          currentImageId,
+        });
+
+        done = completed >= jobIds.length;
+        if (!done) {
+          await wait(1200);
         }
       }
+
+      await fetchInputImages();
       alert(`Re-inference completed. Success: ${success}, Failed: ${failed}`);
+    } catch (error) {
+      alert(`Error: ${error.message || 'Unknown error'}`);
     } finally {
+      setReInferenceProgress((prev) => ({ ...prev, currentImageId: null }));
       setReInferenceBusy(false);
     }
   };
@@ -405,6 +490,9 @@ export default function ImageUpload({ token }) {
     if (status === 'failed') return 'Failed';
     return 'Pending';
   };
+  const reInferencePercent = reInferenceProgress.total > 0
+    ? Math.round((reInferenceProgress.completed / reInferenceProgress.total) * 100)
+    : 0;
 
   return (
     <div>
@@ -584,6 +672,24 @@ export default function ImageUpload({ token }) {
             Delete selected ({selectedInputImageIds.length})
           </button>
         </div>
+        {(reInferenceBusy || reInferenceProgress.total > 0) && (
+          <div className="card" style={{ padding: 10 }}>
+            <div className="muted">
+              Re-inference Progress: {reInferenceProgress.completed}/{reInferenceProgress.total} ({reInferencePercent}%)
+            </div>
+            <div className="muted">
+              Success: {reInferenceProgress.success} | Failed: {reInferenceProgress.failed}
+              {reInferenceBusy && reInferenceProgress.currentImageId
+                ? ` | Processing image #${reInferenceProgress.currentImageId}`
+                : ''}
+            </div>
+            <progress
+              value={reInferenceProgress.completed}
+              max={Math.max(1, reInferenceProgress.total)}
+              style={{ width: '100%' }}
+            />
+          </div>
+        )}
 
         {inputGalleryBusy || inputDeleteBusy ? (
           <p>Loading input images...</p>
@@ -612,6 +718,9 @@ export default function ImageUpload({ token }) {
                       disabled={inputDeleteBusy || reInferenceBusy}
                     />
                   </div>
+                  {inputImageJobStatus[item.id] && (
+                    <div className="muted">Job: {inputImageJobStatus[item.id]}</div>
+                  )}
                   <button
                     className="btn"
                     onClick={() => deleteInputImages([item.id])}

@@ -180,15 +180,72 @@ export const GeneratedVideo = sequelize.define(
   }
 );
 
+export const SwapJob = sequelize.define(
+  "SwapJob",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
+      primaryKey: true,
+    },
+    owner_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    face_model_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    input_image_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    enable_restore: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "queued",
+    },
+    error: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    generated_image_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    started_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    finished_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+  },
+  {
+    tableName: "swap_jobs",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  }
+);
+
 User.hasMany(FaceModel, { foreignKey: "owner_id" });
 User.hasMany(InputImage, { foreignKey: "owner_id" });
 User.hasMany(GeneratedImage, { foreignKey: "owner_id" });
 User.hasMany(GeneratedVideo, { foreignKey: "owner_id" });
+User.hasMany(SwapJob, { foreignKey: "owner_id" });
 
 FaceModel.belongsTo(User, { foreignKey: "owner_id" });
 InputImage.belongsTo(User, { foreignKey: "owner_id" });
 GeneratedImage.belongsTo(User, { foreignKey: "owner_id" });
 GeneratedVideo.belongsTo(User, { foreignKey: "owner_id" });
+SwapJob.belongsTo(User, { foreignKey: "owner_id" });
 
 export async function initDb() {
   await sequelize.authenticate();

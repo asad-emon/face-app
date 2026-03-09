@@ -15,6 +15,7 @@ import {
   InputImage,
   GeneratedImage,
   GeneratedVideo,
+  SwapJob,
 } from "./db.js";
 
 dotenv.config();
@@ -26,8 +27,14 @@ const ACCESS_TOKEN_EXPIRE_MINUTES = Number(
   process.env.ACCESS_TOKEN_EXPIRE_MINUTES || 300
 );
 const INFERENCE_BASE_URL = process.env.INFERENCE_BASE_URL || "";
+const SWAP_TIMEOUT_MS = Number(process.env.SWAP_TIMEOUT_MS || 600000);
+const SWAP_MAX_RETRIES = Math.max(0, Number(process.env.SWAP_MAX_RETRIES || 2));
+const SWAP_RETRY_DELAY_MS = Math.max(0, Number(process.env.SWAP_RETRY_DELAY_MS || 750));
+const SWAP_QUEUE_POLL_LIMIT = Math.max(1, Number(process.env.SWAP_QUEUE_POLL_LIMIT || 200));
 
 const app = express();
+const swapQueue = [];
+let swapWorkerActive = false;
 
 const origins = [
   process.env.CLIENT_ORIGIN,
@@ -158,6 +165,23 @@ function serializeGeneratedVideo(video) {
   };
 }
 
+function serializeSwapJob(job) {
+  return {
+    id: job.id,
+    owner_id: job.owner_id,
+    face_model_id: job.face_model_id,
+    input_image_id: job.input_image_id,
+    enable_restore: Boolean(job.enable_restore),
+    status: job.status,
+    error: job.error || null,
+    generated_image_id: job.generated_image_id || null,
+    started_at: job.started_at || null,
+    finished_at: job.finished_at || null,
+    created_at: job.created_at || null,
+    updated_at: job.updated_at || null,
+  };
+}
+
 function parseRequestedVersion(rawValue) {
   if (rawValue === undefined || rawValue === null || rawValue === "") {
     return null;
@@ -201,6 +225,170 @@ function parseBoolean(rawValue, defaultValue = false) {
     return false;
   }
   return defaultValue;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetrySwapRequest(err) {
+  const code = String(err?.code || "").toUpperCase();
+  const message = String(err?.message || "").toLowerCase();
+
+  if (code === "ECONNRESET" || code === "ECONNABORTED" || code === "ETIMEDOUT" || code === "EPIPE") {
+    return true;
+  }
+  if (message.includes("socket hang up") || message.includes("network error") || message.includes("timeout")) {
+    return true;
+  }
+  return false;
+}
+
+function getErrorDetail(err) {
+  const responseData = err?.response?.data;
+  if (responseData?.detail) {
+    return String(responseData.detail);
+  }
+  if (Buffer.isBuffer(responseData)) {
+    const rawText = responseData.toString("utf8");
+    try {
+      const parsed = JSON.parse(rawText);
+      return String(parsed?.detail || rawText);
+    } catch {
+      return String(rawText);
+    }
+  }
+  if (typeof responseData === "string") {
+    return responseData;
+  }
+  if (responseData) {
+    return String(responseData);
+  }
+  return String(err?.message || err || "Unknown error");
+}
+
+async function runSwapRemote(model, image, modelId, enableRestore) {
+  let response;
+  for (let attempt = 0; attempt <= SWAP_MAX_RETRIES; attempt += 1) {
+    const form = new FormData();
+    form.append("model_id", String(modelId));
+    form.append("enable_restore", enableRestore ? "1" : "0");
+    form.append("model_file", model.data, {
+      filename: "model.safetensors",
+      contentType: "application/octet-stream",
+    });
+    form.append("target_image", image.data, {
+      filename: image.filename || "target.png",
+      contentType: "image/png",
+    });
+
+    try {
+      response = await axios.post(
+        `${INFERENCE_BASE_URL}/swap-remote`,
+        form,
+        {
+          headers: form.getHeaders(),
+          responseType: "arraybuffer",
+          timeout: SWAP_TIMEOUT_MS,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+        }
+      );
+      break;
+    } catch (err) {
+      const canRetry = attempt < SWAP_MAX_RETRIES && shouldRetrySwapRequest(err);
+      if (!canRetry) {
+        throw err;
+      }
+      console.warn(
+        `[WARN] POST /swap upstream request failed (attempt ${attempt + 1}/${SWAP_MAX_RETRIES + 1}): ${err?.message || err}`
+      );
+      if (SWAP_RETRY_DELAY_MS > 0) {
+        await sleep(SWAP_RETRY_DELAY_MS);
+      }
+    }
+  }
+  return Buffer.from(response.data);
+}
+
+async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) {
+  const model = await FaceModel.findOne({
+    where: { id: modelId, owner_id: ownerId, is_deleted: false },
+  });
+  const image = await InputImage.findOne({
+    where: { id: imageId, owner_id: ownerId },
+  });
+  if (!model || !image) {
+    throw new Error("Model or image not found");
+  }
+
+  const outputBytes = await runSwapRemote(model, image, modelId, enableRestore);
+  const generated = await GeneratedImage.create({
+    data: outputBytes,
+    owner_id: ownerId,
+    input_image_id: imageId,
+    face_model_id: modelId,
+  });
+  return { outputBytes, generatedImageId: generated.id };
+}
+
+function enqueueSwapJob(jobId) {
+  if (!swapQueue.includes(jobId)) {
+    swapQueue.push(jobId);
+  }
+  void processSwapQueue();
+}
+
+async function processSwapQueue() {
+  if (swapWorkerActive) {
+    return;
+  }
+  swapWorkerActive = true;
+
+  try {
+    while (swapQueue.length > 0) {
+      const jobId = swapQueue.shift();
+      const job = await SwapJob.findByPk(jobId);
+      if (!job || job.status !== "queued") {
+        continue;
+      }
+
+      await job.update({
+        status: "processing",
+        error: null,
+        started_at: new Date(),
+        finished_at: null,
+      });
+
+      try {
+        const { generatedImageId } = await runSwapAndStore(
+          job.owner_id,
+          job.face_model_id,
+          job.input_image_id,
+          Boolean(job.enable_restore)
+        );
+        await job.update({
+          status: "done",
+          generated_image_id: generatedImageId,
+          error: null,
+          finished_at: new Date(),
+        });
+      } catch (err) {
+        const detail = getErrorDetail(err).slice(0, 2000);
+        await job.update({
+          status: "failed",
+          error: detail,
+          finished_at: new Date(),
+        });
+        logApiError(`processSwapQueue job ${job.id}`, err);
+      }
+    }
+  } finally {
+    swapWorkerActive = false;
+    if (swapQueue.length > 0) {
+      void processSwapQueue();
+    }
+  }
 }
 
 async function resolveVersion(ownerId, personName, requestedVersion, transaction) {
@@ -701,6 +889,13 @@ app.delete("/images/:id(\\d+)", requireAuth, async (req, res) => {
       },
       transaction,
     });
+    await SwapJob.destroy({
+      where: {
+        owner_id: req.user.id,
+        input_image_id: id,
+      },
+      transaction,
+    });
     const deletedInput = await InputImage.destroy({
       where: { id, owner_id: req.user.id },
       transaction,
@@ -744,6 +939,13 @@ app.delete("/images", requireAuth, async (req, res) => {
     }
 
     const deletedGenerated = await GeneratedImage.destroy({
+      where: {
+        owner_id: req.user.id,
+        input_image_id: { [Op.in]: existingIds },
+      },
+      transaction,
+    });
+    await SwapJob.destroy({
       where: {
         owner_id: req.user.id,
         input_image_id: { [Op.in]: existingIds },
@@ -937,6 +1139,96 @@ app.delete("/videos/generated", requireAuth, async (req, res) => {
   return res.json({ deleted });
 });
 
+app.post("/swap-jobs", requireAuth, async (req, res) => {
+  const modelId = Number(req.body?.model_id);
+  const enableRestore = parseBoolean(req.body?.enable_restore, false);
+  const imageIds = Array.isArray(req.body?.image_ids)
+    ? req.body.image_ids
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+
+  if (!modelId || imageIds.length === 0) {
+    return res.status(400).json({ detail: "model_id and non-empty image_ids are required" });
+  }
+  if (!INFERENCE_BASE_URL) {
+    return res.status(500).json({ detail: "INFERENCE_BASE_URL is not configured" });
+  }
+
+  const model = await FaceModel.findOne({
+    where: { id: modelId, owner_id: req.user.id, is_deleted: false },
+    attributes: ["id"],
+  });
+  if (!model) {
+    return res.status(404).json({ detail: "Model not found" });
+  }
+
+  const uniqueImageIds = [...new Set(imageIds)];
+  const ownedImages = await InputImage.findAll({
+    where: {
+      owner_id: req.user.id,
+      id: { [Op.in]: uniqueImageIds },
+    },
+    attributes: ["id"],
+  });
+  if (ownedImages.length !== uniqueImageIds.length) {
+    return res.status(404).json({ detail: "One or more input images were not found" });
+  }
+
+  const jobs = await sequelize.transaction(async (transaction) => {
+    const created = [];
+    for (const imageId of uniqueImageIds) {
+      const job = await SwapJob.create(
+        {
+          owner_id: req.user.id,
+          face_model_id: modelId,
+          input_image_id: imageId,
+          enable_restore: enableRestore,
+          status: "queued",
+        },
+        { transaction }
+      );
+      created.push(job);
+    }
+    return created;
+  });
+
+  jobs.forEach((job) => enqueueSwapJob(job.id));
+  return res.status(202).json({
+    items: jobs.map(serializeSwapJob),
+    total: jobs.length,
+  });
+});
+
+app.get("/swap-jobs", requireAuth, async (req, res) => {
+  const ids = String(req.query.ids || "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+
+  if (ids.length === 0) {
+    return res.status(400).json({ detail: "ids query param is required (comma-separated)" });
+  }
+  if (ids.length > SWAP_QUEUE_POLL_LIMIT) {
+    return res.status(400).json({ detail: `Maximum ${SWAP_QUEUE_POLL_LIMIT} ids per poll request` });
+  }
+
+  const uniqueIds = [...new Set(ids)];
+  const jobs = await SwapJob.findAll({
+    where: {
+      owner_id: req.user.id,
+      id: { [Op.in]: uniqueIds },
+    },
+    order: [["id", "ASC"]],
+    limit: SWAP_QUEUE_POLL_LIMIT,
+  });
+
+  return res.json({
+    items: jobs.map(serializeSwapJob),
+    total: jobs.length,
+  });
+});
+
 app.post("/swap", requireAuth, async (req, res) => {
   const modelId = Number(req.query.model_id || req.body.model_id);
   const imageId = Number(req.query.image_id || req.body.image_id);
@@ -950,18 +1242,6 @@ app.post("/swap", requireAuth, async (req, res) => {
       .status(400)
       .json({ detail: "model_id and image_id are required" });
   }
-
-  const model = await FaceModel.findOne({
-    where: { id: modelId, owner_id: req.user.id, is_deleted: false },
-  });
-  const image = await InputImage.findOne({
-    where: { id: imageId, owner_id: req.user.id },
-  });
-
-  if (!model || !image) {
-    return res.status(404).json({ detail: "Model or image not found" });
-  }
-
   if (!INFERENCE_BASE_URL) {
     return res
       .status(500)
@@ -969,43 +1249,16 @@ app.post("/swap", requireAuth, async (req, res) => {
   }
 
   try {
-    const form = new FormData();
-    form.append("model_id", String(modelId));
-    form.append("enable_restore", enableRestore ? "1" : "0");
-    form.append("model_file", model.data, {
-      filename: "model.safetensors",
-      contentType: "application/octet-stream",
-    });
-    form.append("target_image", image.data, {
-      filename: image.filename || "target.png",
-      contentType: "image/png",
-    });
-
-    const response = await axios.post(
-      `${INFERENCE_BASE_URL}/swap-remote`,
-      form,
-      {
-        headers: form.getHeaders(),
-        responseType: "arraybuffer",
-        timeout: 120000,
-      }
-    );
-
-    const outputBytes = Buffer.from(response.data);
-
-    await GeneratedImage.create({
-      data: outputBytes,
-      owner_id: req.user.id,
-      input_image_id: imageId,
-      face_model_id: modelId,
-    });
-
+    const { outputBytes } = await runSwapAndStore(req.user.id, modelId, imageId, enableRestore);
     return res.json({
       result: `data:image/jpeg;base64,${outputBytes.toString("base64")}`,
     });
   } catch (err) {
+    if (String(err?.message || "").toLowerCase().includes("not found")) {
+      return res.status(404).json({ detail: "Model or image not found" });
+    }
     logApiError("POST /swap", err);
-    const detail = err.response?.data?.detail || err.message;
+    const detail = getErrorDetail(err);
     return res.status(502).json({ detail: `Swap service failed: ${detail}` });
   }
 });
@@ -1106,6 +1359,17 @@ app.post("/swap-video", requireAuth, upload.single("file"), async (req, res) => 
 async function start() {
   try {
     await initDb();
+    await SwapJob.update(
+      { status: "queued", started_at: null, error: null },
+      { where: { status: "processing" } }
+    );
+    const queuedJobs = await SwapJob.findAll({
+      where: { status: "queued" },
+      attributes: ["id"],
+      order: [["id", "ASC"]],
+    });
+    queuedJobs.forEach((job) => enqueueSwapJob(job.id));
+
     app.listen(PORT, () => {
       console.log(`API server listening on ${PORT}`);
     });

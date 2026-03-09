@@ -23,17 +23,12 @@ class FaceSwapService:
         self._registry = registry or get_model_registry()
 
     @staticmethod
-    def _select_gpen_input_size(patch_bgr: np.ndarray) -> int:
-        h, w = patch_bgr.shape[:2]
-        return 1024 if max(h, w) > 512 else 512
-
-    @staticmethod
-    def _run_gpen_on_patch(patch_bgr: np.ndarray, gpen_session, input_size: int) -> np.ndarray:
+    def _run_gpen_on_patch(patch_bgr: np.ndarray, gpen_session) -> np.ndarray:
         gpen_input_name = gpen_session.get_inputs()[0].name
         gpen_output_name = gpen_session.get_outputs()[0].name
         h, w = patch_bgr.shape[:2]
 
-        patch_resized = cv2.resize(patch_bgr, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
+        patch_resized = cv2.resize(patch_bgr, (512, 512), interpolation=cv2.INTER_LINEAR)
         blob = patch_resized.astype(np.float32) / 127.5 - 1.0
         blob = np.transpose(blob, (2, 0, 1))[np.newaxis, :]
         out = gpen_session.run([gpen_output_name], {gpen_input_name: blob})[0][0]
@@ -195,6 +190,7 @@ class FaceSwapService:
         self._registry.prepare_face_analyzer_for_image(img_bgr.shape)
         face_analyzer = self._registry.get_face_analyzer()
         swapper = self._registry.get_swapper()
+        gpen_session = self._registry.get_gpen_session() if enable_restore else None
 
         with timed_log(
             logger,
@@ -244,12 +240,10 @@ class FaceSwapService:
                     )
                     continue
 
-                gpen_input_size = self._select_gpen_input_size(face_region)
-                gpen_session = self._registry.get_gpen_session(gpen_input_size)
                 if gpen_session is None:
                     continue
 
-                restored_patch = self._run_gpen_on_patch(face_region, gpen_session, gpen_input_size)
+                restored_patch = self._run_gpen_on_patch(face_region, gpen_session)
                 restored_patch_matched = match_histograms(
                     restored_patch,
                     face_region,
