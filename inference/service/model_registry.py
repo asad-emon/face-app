@@ -20,7 +20,7 @@ class ModelRegistry:
         self._settings = settings
         self._lock = Lock()
         self._models: Optional[ModelTuple] = None
-        self._gpen_session: Optional[ort.InferenceSession] = None
+        self._gpen_sessions: dict[int, ort.InferenceSession] = {}
         self._current_det_size: Optional[int] = None
 
     def _download_model(self, filename: str) -> str:
@@ -68,7 +68,7 @@ class ModelRegistry:
 
     def preload_assets(self) -> None:
         self.get_models()
-        self.get_gpen_session()
+        self.get_gpen_session(512)
         logger.info("preload_complete", extra={"event": "preload_complete"})
 
     def get_models(self) -> ModelTuple:
@@ -104,17 +104,23 @@ class ModelRegistry:
     def get_swapper(self):
         return self.get_models()[1]
 
-    def get_gpen_session(self) -> Optional[ort.InferenceSession]:
-        if self._gpen_session is None:
-            with self._lock:
-                if self._gpen_session is None:
-                    with timed_log(logger, "gpen_initialize"):
-                        gpen_path = self._download_model("GPEN-BFR-1024.onnx")
-                        self._gpen_session = ort.InferenceSession(
-                            gpen_path,
-                            providers=["CPUExecutionProvider"],
-                        )
-        return self._gpen_session
+    def get_gpen_session(self, input_size: int = 512) -> Optional[ort.InferenceSession]:
+        normalized_size = 1024 if input_size >= 1024 else 512
+        session = self._gpen_sessions.get(normalized_size)
+        if session is not None:
+            return session
+
+        with self._lock:
+            session = self._gpen_sessions.get(normalized_size)
+            if session is None:
+                with timed_log(logger, "gpen_initialize", input_size=normalized_size):
+                    gpen_path = self._download_model(f"GPEN-BFR-{normalized_size}.onnx")
+                    session = ort.InferenceSession(
+                        gpen_path,
+                        providers=["CPUExecutionProvider"],
+                    )
+                    self._gpen_sessions[normalized_size] = session
+        return session
 
 
 _REGISTRY: Optional[ModelRegistry] = None
