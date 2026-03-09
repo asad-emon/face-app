@@ -652,14 +652,23 @@ app.post("/images", requireAuth, upload.single("file"), async (req, res) => {
 });
 
 app.get("/images/generated", requireAuth, async (req, res) => {
-  const skip = Number(req.query.skip || 0);
-  const limit = Number(req.query.limit || 100);
-  const images = await GeneratedImage.findAll({
+  const parsedSkip = Number(req.query.skip);
+  const parsedLimit = Number(req.query.limit);
+  const skip = Number.isInteger(parsedSkip) && parsedSkip >= 0 ? parsedSkip : 0;
+  const limit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 12;
+
+  const { count, rows } = await GeneratedImage.findAndCountAll({
     where: { owner_id: req.user.id },
+    order: [["id", "DESC"]],
     offset: skip,
     limit,
   });
-  return res.json(images.map(serializeGeneratedImage));
+  return res.json({
+    items: rows.map(serializeGeneratedImage),
+    total: count,
+    skip,
+    limit,
+  });
 });
 
 app.delete("/images/generated/:id", requireAuth, async (req, res) => {
@@ -702,15 +711,23 @@ app.delete("/images/generated", requireAuth, async (req, res) => {
 });
 
 app.get("/videos/generated", requireAuth, async (req, res) => {
-  const skip = Number(req.query.skip || 0);
-  const limit = Number(req.query.limit || 100);
-  const videos = await GeneratedVideo.findAll({
+  const parsedSkip = Number(req.query.skip);
+  const parsedLimit = Number(req.query.limit);
+  const skip = Number.isInteger(parsedSkip) && parsedSkip >= 0 ? parsedSkip : 0;
+  const limit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 8;
+
+  const { count, rows } = await GeneratedVideo.findAndCountAll({
     where: { owner_id: req.user.id },
     order: [["id", "DESC"]],
     offset: skip,
     limit,
   });
-  return res.json(videos.map(serializeGeneratedVideo));
+  return res.json({
+    items: rows.map(serializeGeneratedVideo),
+    total: count,
+    skip,
+    limit,
+  });
 });
 
 app.get("/videos/generated/:id/content", requireAuth, async (req, res) => {

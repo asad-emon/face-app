@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import './styles.css';
 import { apiBaseUrl } from './utils';
 
+const IMAGE_PAGE_SIZE = 12;
+const VIDEO_PAGE_SIZE = 8;
+
 function GalleryTab({ active, onClick, children }) {
   return <button className={active ? 'tab active' : 'tab'} onClick={onClick}>{children}</button>;
 }
@@ -15,19 +18,30 @@ export default function ImageGallery({ token, isActive = false }) {
   const [deleting, setDeleting] = useState(false);
   const [selectedImageIds, setSelectedImageIds] = useState([]);
   const [selectedVideoIds, setSelectedVideoIds] = useState([]);
+  const [imageTotal, setImageTotal] = useState(0);
+  const [videoTotal, setVideoTotal] = useState(0);
+  const [imagePage, setImagePage] = useState(1);
+  const [videoPage, setVideoPage] = useState(1);
   const [previewId, setPreviewId] = useState(null);
   const [videoSources, setVideoSources] = useState({});
   const [loadingVideoIds, setLoadingVideoIds] = useState([]);
   const videoSourcesRef = useRef({});
 
-  const fetchGallery = async () => {
+  const fetchGallery = async (options = {}) => {
+    const nextImagePage = Number.isInteger(options.imagePage) && options.imagePage > 0 ? options.imagePage : imagePage;
+    const nextVideoPage = Number.isInteger(options.videoPage) && options.videoPage > 0 ? options.videoPage : videoPage;
+    const imageSkip = (nextImagePage - 1) * IMAGE_PAGE_SIZE;
+    const videoSkip = (nextVideoPage - 1) * VIDEO_PAGE_SIZE;
+    const imageParams = new URLSearchParams({ skip: String(imageSkip), limit: String(IMAGE_PAGE_SIZE) });
+    const videoParams = new URLSearchParams({ skip: String(videoSkip), limit: String(VIDEO_PAGE_SIZE) });
+
     setBusy(true);
     try {
       const [imagesResponse, videosResponse, modelsResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/images/generated`, {
+        fetch(`${apiBaseUrl}/images/generated?${imageParams.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        fetch(`${apiBaseUrl}/videos/generated`, {
+        fetch(`${apiBaseUrl}/videos/generated?${videoParams.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
         fetch(`${apiBaseUrl}/models`, {
@@ -47,14 +61,21 @@ export default function ImageGallery({ token, isActive = false }) {
         videosResponse.json(),
       ]);
 
-      setImages(imageData);
-      setVideos(videoData);
+      const imageItems = Array.isArray(imageData) ? imageData : imageData.items || [];
+      const videoItems = Array.isArray(videoData) ? videoData : videoData.items || [];
+      const nextImageTotal = Array.isArray(imageData) ? imageItems.length : Number(imageData.total) || 0;
+      const nextVideoTotal = Array.isArray(videoData) ? videoItems.length : Number(videoData.total) || 0;
+
+      setImages(imageItems);
+      setVideos(videoItems);
+      setImageTotal(nextImageTotal);
+      setVideoTotal(nextVideoTotal);
       setSelectedImageIds((prev) => {
-        const available = new Set(imageData.map((item) => item.id));
+        const available = new Set(imageItems.map((item) => item.id));
         return prev.filter((id) => available.has(id));
       });
       setSelectedVideoIds((prev) => {
-        const available = new Set(videoData.map((item) => item.id));
+        const available = new Set(videoItems.map((item) => item.id));
         return prev.filter((id) => available.has(id));
       });
 
@@ -99,12 +120,18 @@ export default function ImageGallery({ token, isActive = false }) {
         throw new Error(detail);
       }
 
+      const payload = await response.json();
+      const deletedCount = Number(payload?.deleted) || 0;
       const deleted = new Set(ids);
-      setImages((prev) => prev.filter((item) => !deleted.has(item.id)));
       setSelectedImageIds((prev) => prev.filter((id) => !deleted.has(id)));
       if (previewId !== null && deleted.has(previewId)) {
         setPreviewId(null);
       }
+      const nextTotal = Math.max(0, imageTotal - deletedCount);
+      const totalPages = Math.max(1, Math.ceil(nextTotal / IMAGE_PAGE_SIZE));
+      const nextPage = Math.min(imagePage, totalPages);
+      setImagePage(nextPage);
+      await fetchGallery({ imagePage: nextPage });
     } catch (error) {
       console.error('Failed to delete images:', error);
       alert('Error: ' + error.message);
@@ -136,8 +163,9 @@ export default function ImageGallery({ token, isActive = false }) {
         throw new Error(detail);
       }
 
+      const payload = await response.json();
+      const deletedCount = Number(payload?.deleted) || 0;
       const deleted = new Set(ids);
-      setVideos((prev) => prev.filter((item) => !deleted.has(item.id)));
       setSelectedVideoIds((prev) => prev.filter((id) => !deleted.has(id)));
       setVideoSources((prev) => {
         const next = { ...prev };
@@ -149,6 +177,11 @@ export default function ImageGallery({ token, isActive = false }) {
         });
         return next;
       });
+      const nextTotal = Math.max(0, videoTotal - deletedCount);
+      const totalPages = Math.max(1, Math.ceil(nextTotal / VIDEO_PAGE_SIZE));
+      const nextPage = Math.min(videoPage, totalPages);
+      setVideoPage(nextPage);
+      await fetchGallery({ videoPage: nextPage });
     } catch (error) {
       console.error('Failed to delete videos:', error);
       alert('Error: ' + error.message);
@@ -220,7 +253,7 @@ export default function ImageGallery({ token, isActive = false }) {
     if (token && isActive) {
       fetchGallery();
     }
-  }, [token, isActive]);
+  }, [token, isActive, imagePage, videoPage]);
 
   useEffect(() => {
     if (!preview) return undefined;
@@ -250,7 +283,7 @@ export default function ImageGallery({ token, isActive = false }) {
         <div className="row" style={{ gap: 8 }}>
           <GalleryTab active={activeType === 'images'} onClick={() => setActiveType('images')}>Images</GalleryTab>
           <GalleryTab active={activeType === 'videos'} onClick={() => setActiveType('videos')}>Videos</GalleryTab>
-          <button className="btn" onClick={fetchGallery} disabled={busy || deleting}>Refresh</button>
+          <button className="btn" onClick={() => fetchGallery()} disabled={busy || deleting}>Refresh</button>
         </div>
       </div>
 
@@ -285,42 +318,69 @@ export default function ImageGallery({ token, isActive = false }) {
           ) : images.length === 0 ? (
             <div className="muted">No images generated yet.</div>
           ) : (
-            <div className="grid">
-              {images.map((image) => (
-                <div key={image.id} className="card" style={{ padding: 12 }}>
-                  <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedImageIds.includes(image.id)}
-                        onChange={() =>
-                          setSelectedImageIds((prev) =>
-                            prev.includes(image.id) ? prev.filter((id) => id !== image.id) : [...prev, image.id]
-                          )
-                        }
-                      />
-                      <span className="muted">#{image.id}</span>
-                    </label>
-                    <button
-                      className="btn"
-                      onClick={() => deleteImages([image.id])}
-                      disabled={busy || deleting}
-                      style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2', padding: '6px 10px' }}
-                    >
-                      Delete
-                    </button>
+            <>
+              <div className="grid">
+                {images.map((image) => (
+                  <div key={image.id} className="card" style={{ padding: 12 }}>
+                    <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedImageIds.includes(image.id)}
+                          onChange={() =>
+                            setSelectedImageIds((prev) =>
+                              prev.includes(image.id) ? prev.filter((id) => id !== image.id) : [...prev, image.id]
+                            )
+                          }
+                        />
+                        <span className="muted">#{image.id}</span>
+                      </label>
+                      <button
+                        className="btn"
+                        onClick={() => deleteImages([image.id])}
+                        disabled={busy || deleting}
+                        style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2', padding: '6px 10px' }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <img
+                      src={`data:image/jpeg;base64,${image.data}`}
+                      className="thumb"
+                      alt="Generated content"
+                      onClick={() => setPreviewId(image.id)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <div className="muted" style={{ marginTop: 8 }}>{modelLabel(image.face_model_id)}</div>
                   </div>
-                  <img
-                    src={`data:image/jpeg;base64,${image.data}`}
-                    className="thumb"
-                    alt="Generated content"
-                    onClick={() => setPreviewId(image.id)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  <div className="muted" style={{ marginTop: 8 }}>{modelLabel(image.face_model_id)}</div>
+                ))}
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                <div className="muted">
+                  Page {imagePage} / {Math.max(1, Math.ceil(imageTotal / IMAGE_PAGE_SIZE))} ({imageTotal} total)
                 </div>
-              ))}
-            </div>
+                <div className="row" style={{ gap: 8 }}>
+                  <button
+                    className="btn"
+                    onClick={() => setImagePage((prev) => Math.max(1, prev - 1))}
+                    disabled={busy || deleting || imagePage <= 1}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => setImagePage((prev) => prev + 1)}
+                    disabled={
+                      busy ||
+                      deleting ||
+                      imagePage >= Math.max(1, Math.ceil(imageTotal / IMAGE_PAGE_SIZE))
+                    }
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </>
       )}
@@ -356,53 +416,80 @@ export default function ImageGallery({ token, isActive = false }) {
           ) : videos.length === 0 ? (
             <div className="muted">No videos generated yet.</div>
           ) : (
-            <div className="preview-grid">
-              {videos.map((video) => (
-                <div key={video.id} className="preview-card">
-                  <div className="preview-meta">
-                    <span className="preview-name">#{video.id} {video.filename}</span>
-                    <input
-                      type="checkbox"
-                      checked={selectedVideoIds.includes(video.id)}
-                      onChange={() =>
-                        setSelectedVideoIds((prev) =>
-                          prev.includes(video.id) ? prev.filter((id) => id !== video.id) : [...prev, video.id]
-                        )
-                      }
-                    />
-                  </div>
-                  {videoSources[video.id] ? (
-                    <video
-                      src={videoSources[video.id]}
-                      controls
-                      className="preview-img"
-                    />
-                  ) : video.processing ? (
-                    <div className="muted">Video is still processing.</div>
-                  ) : !video.has_content ? (
-                    <div className="muted">No playable video data yet.</div>
-                  ) : (
+            <>
+              <div className="preview-grid">
+                {videos.map((video) => (
+                  <div key={video.id} className="preview-card">
+                    <div className="preview-meta">
+                      <span className="preview-name">#{video.id} {video.filename}</span>
+                      <input
+                        type="checkbox"
+                        checked={selectedVideoIds.includes(video.id)}
+                        onChange={() =>
+                          setSelectedVideoIds((prev) =>
+                            prev.includes(video.id) ? prev.filter((id) => id !== video.id) : [...prev, video.id]
+                          )
+                        }
+                      />
+                    </div>
+                    {videoSources[video.id] ? (
+                      <video
+                        src={videoSources[video.id]}
+                        controls
+                        className="preview-img"
+                      />
+                    ) : video.processing ? (
+                      <div className="muted">Video is still processing.</div>
+                    ) : !video.has_content ? (
+                      <div className="muted">No playable video data yet.</div>
+                    ) : (
+                      <button
+                        className="btn"
+                        onClick={() => loadVideoSource(video)}
+                        disabled={loadingVideoIds.includes(video.id)}
+                      >
+                        {loadingVideoIds.includes(video.id) ? 'Loading...' : 'Load Video'}
+                      </button>
+                    )}
+                    <div className="muted">Model: {modelLabel(video.face_model_id)}</div>
+                    <div className="muted">Processing: {video.processing ? 'Yes' : 'No'}</div>
                     <button
                       className="btn"
-                      onClick={() => loadVideoSource(video)}
-                      disabled={loadingVideoIds.includes(video.id)}
+                      onClick={() => deleteVideos([video.id])}
+                      disabled={busy || deleting}
+                      style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2', padding: '6px 10px' }}
                     >
-                      {loadingVideoIds.includes(video.id) ? 'Loading...' : 'Load Video'}
+                      Delete
                     </button>
-                  )}
-                  <div className="muted">Model: {modelLabel(video.face_model_id)}</div>
-                  <div className="muted">Processing: {video.processing ? 'Yes' : 'No'}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                <div className="muted">
+                  Page {videoPage} / {Math.max(1, Math.ceil(videoTotal / VIDEO_PAGE_SIZE))} ({videoTotal} total)
+                </div>
+                <div className="row" style={{ gap: 8 }}>
                   <button
                     className="btn"
-                    onClick={() => deleteVideos([video.id])}
-                    disabled={busy || deleting}
-                    style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2', padding: '6px 10px' }}
+                    onClick={() => setVideoPage((prev) => Math.max(1, prev - 1))}
+                    disabled={busy || deleting || videoPage <= 1}
                   >
-                    Delete
+                    Previous
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => setVideoPage((prev) => prev + 1)}
+                    disabled={
+                      busy ||
+                      deleting ||
+                      videoPage >= Math.max(1, Math.ceil(videoTotal / VIDEO_PAGE_SIZE))
+                    }
+                  >
+                    Next
                   </button>
                 </div>
-              ))}
-            </div>
+              </div>
+            </>
           )}
         </>
       )}
