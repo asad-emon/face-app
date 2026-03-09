@@ -4,6 +4,7 @@ import { apiBaseUrl } from './utils';
 
 const IMAGE_PAGE_SIZE = 12;
 const VIDEO_PAGE_SIZE = 8;
+const PAGE_SIZE_OPTIONS = [8, 12, 24, 48];
 
 function GalleryTab({ active, onClick, children }) {
   return <button className={active ? 'tab active' : 'tab'} onClick={onClick}>{children}</button>;
@@ -22,6 +23,8 @@ export default function ImageGallery({ token, isActive = false }) {
   const [videoTotal, setVideoTotal] = useState(0);
   const [imagePage, setImagePage] = useState(1);
   const [videoPage, setVideoPage] = useState(1);
+  const [imagePageSize, setImagePageSize] = useState(IMAGE_PAGE_SIZE);
+  const [videoPageSize, setVideoPageSize] = useState(VIDEO_PAGE_SIZE);
   const [previewId, setPreviewId] = useState(null);
   const [videoSources, setVideoSources] = useState({});
   const [loadingVideoIds, setLoadingVideoIds] = useState([]);
@@ -30,10 +33,10 @@ export default function ImageGallery({ token, isActive = false }) {
   const fetchGallery = async (options = {}) => {
     const nextImagePage = Number.isInteger(options.imagePage) && options.imagePage > 0 ? options.imagePage : imagePage;
     const nextVideoPage = Number.isInteger(options.videoPage) && options.videoPage > 0 ? options.videoPage : videoPage;
-    const imageSkip = (nextImagePage - 1) * IMAGE_PAGE_SIZE;
-    const videoSkip = (nextVideoPage - 1) * VIDEO_PAGE_SIZE;
-    const imageParams = new URLSearchParams({ skip: String(imageSkip), limit: String(IMAGE_PAGE_SIZE) });
-    const videoParams = new URLSearchParams({ skip: String(videoSkip), limit: String(VIDEO_PAGE_SIZE) });
+    const imageSkip = (nextImagePage - 1) * imagePageSize;
+    const videoSkip = (nextVideoPage - 1) * videoPageSize;
+    const imageParams = new URLSearchParams({ skip: String(imageSkip), limit: String(imagePageSize) });
+    const videoParams = new URLSearchParams({ skip: String(videoSkip), limit: String(videoPageSize) });
 
     setBusy(true);
     try {
@@ -128,7 +131,7 @@ export default function ImageGallery({ token, isActive = false }) {
         setPreviewId(null);
       }
       const nextTotal = Math.max(0, imageTotal - deletedCount);
-      const totalPages = Math.max(1, Math.ceil(nextTotal / IMAGE_PAGE_SIZE));
+      const totalPages = Math.max(1, Math.ceil(nextTotal / imagePageSize));
       const nextPage = Math.min(imagePage, totalPages);
       setImagePage(nextPage);
       await fetchGallery({ imagePage: nextPage });
@@ -178,7 +181,7 @@ export default function ImageGallery({ token, isActive = false }) {
         return next;
       });
       const nextTotal = Math.max(0, videoTotal - deletedCount);
-      const totalPages = Math.max(1, Math.ceil(nextTotal / VIDEO_PAGE_SIZE));
+      const totalPages = Math.max(1, Math.ceil(nextTotal / videoPageSize));
       const nextPage = Math.min(videoPage, totalPages);
       setVideoPage(nextPage);
       await fetchGallery({ videoPage: nextPage });
@@ -253,7 +256,7 @@ export default function ImageGallery({ token, isActive = false }) {
     if (token && isActive) {
       fetchGallery();
     }
-  }, [token, isActive, imagePage, videoPage]);
+  }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize]);
 
   useEffect(() => {
     if (!preview) return undefined;
@@ -357,9 +360,24 @@ export default function ImageGallery({ token, isActive = false }) {
               </div>
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
                 <div className="muted">
-                  Page {imagePage} / {Math.max(1, Math.ceil(imageTotal / IMAGE_PAGE_SIZE))} ({imageTotal} total)
+                  Page {imagePage} / {Math.max(1, Math.ceil(imageTotal / imagePageSize))} ({imageTotal} total)
                 </div>
-                <div className="row" style={{ gap: 8 }}>
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <label className="muted" htmlFor="image-page-size">Per page</label>
+                  <select
+                    id="image-page-size"
+                    value={imagePageSize}
+                    onChange={(event) => {
+                      setImagePageSize(Number(event.target.value));
+                      setImagePage(1);
+                    }}
+                    disabled={busy || deleting}
+                    style={{ width: 90 }}
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
                   <button
                     className="btn"
                     onClick={() => setImagePage((prev) => Math.max(1, prev - 1))}
@@ -373,7 +391,7 @@ export default function ImageGallery({ token, isActive = false }) {
                     disabled={
                       busy ||
                       deleting ||
-                      imagePage >= Math.max(1, Math.ceil(imageTotal / IMAGE_PAGE_SIZE))
+                      imagePage >= Math.max(1, Math.ceil(imageTotal / imagePageSize))
                     }
                   >
                     Next
@@ -466,9 +484,24 @@ export default function ImageGallery({ token, isActive = false }) {
               </div>
               <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
                 <div className="muted">
-                  Page {videoPage} / {Math.max(1, Math.ceil(videoTotal / VIDEO_PAGE_SIZE))} ({videoTotal} total)
+                  Page {videoPage} / {Math.max(1, Math.ceil(videoTotal / videoPageSize))} ({videoTotal} total)
                 </div>
-                <div className="row" style={{ gap: 8 }}>
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <label className="muted" htmlFor="video-page-size">Per page</label>
+                  <select
+                    id="video-page-size"
+                    value={videoPageSize}
+                    onChange={(event) => {
+                      setVideoPageSize(Number(event.target.value));
+                      setVideoPage(1);
+                    }}
+                    disabled={busy || deleting}
+                    style={{ width: 90 }}
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
                   <button
                     className="btn"
                     onClick={() => setVideoPage((prev) => Math.max(1, prev - 1))}
@@ -482,7 +515,7 @@ export default function ImageGallery({ token, isActive = false }) {
                     disabled={
                       busy ||
                       deleting ||
-                      videoPage >= Math.max(1, Math.ceil(videoTotal / VIDEO_PAGE_SIZE))
+                      videoPage >= Math.max(1, Math.ceil(videoTotal / videoPageSize))
                     }
                   >
                     Next
@@ -537,6 +570,24 @@ export default function ImageGallery({ token, isActive = false }) {
           >
             {previewIndex + 1} / {images.length}
           </div>
+          <button
+            className="btn"
+            onClick={(event) => {
+              event.stopPropagation();
+              deleteImages([preview.id]);
+            }}
+            disabled={busy || deleting}
+            style={{
+              position: 'absolute',
+              top: 20,
+              left: 20,
+              background: '#4a2525',
+              borderColor: '#7a3a3a',
+              color: '#ffc2c2',
+            }}
+          >
+            Delete image
+          </button>
         </div>
       )}
     </div>

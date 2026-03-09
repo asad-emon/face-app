@@ -3,6 +3,8 @@ import './styles.css';
 import { apiBaseUrl } from './utils';
 
 let nextLocalId = 1;
+const INPUT_PAGE_SIZE = 12;
+const PAGE_SIZE_OPTIONS = [8, 12, 24, 48];
 
 function groupByPerson(models) {
   const groups = new Map();
@@ -39,11 +41,23 @@ export default function ImageUpload({ token }) {
   const [videoResultUrl, setVideoResultUrl] = useState('');
   const [videoBusy, setVideoBusy] = useState(false);
   const [videoError, setVideoError] = useState('');
+  const [inputImages, setInputImages] = useState([]);
+  const [selectedInputImageIds, setSelectedInputImageIds] = useState([]);
+  const [inputImageTotal, setInputImageTotal] = useState(0);
+  const [inputImagePage, setInputImagePage] = useState(1);
+  const [inputImagePageSize, setInputImagePageSize] = useState(INPUT_PAGE_SIZE);
+  const [inputGalleryBusy, setInputGalleryBusy] = useState(false);
+  const [reInferenceBusy, setReInferenceBusy] = useState(false);
+  const [inputDeleteBusy, setInputDeleteBusy] = useState(false);
   const targetImagesRef = useRef([]);
 
   useEffect(() => {
     fetchModels();
   }, [token]);
+
+  useEffect(() => {
+    fetchInputImages();
+  }, [token, inputImagePage, inputImagePageSize]);
 
   useEffect(() => {
     targetImagesRef.current = targetImages;
@@ -97,6 +111,38 @@ export default function ImageUpload({ token }) {
       }
     } catch (error) {
       console.error('Failed to fetch models:', error);
+    }
+  };
+
+  const fetchInputImages = async (options = {}) => {
+    const nextPage = Number.isInteger(options.page) && options.page > 0 ? options.page : inputImagePage;
+    const nextPageSize =
+      Number.isInteger(options.pageSize) && options.pageSize > 0 ? options.pageSize : inputImagePageSize;
+    const skip = (nextPage - 1) * nextPageSize;
+    const params = new URLSearchParams({
+      skip: String(skip),
+      limit: String(nextPageSize),
+      include_data: '1',
+    });
+
+    setInputGalleryBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/images?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch input images');
+      }
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : data.items || [];
+      const total = Array.isArray(data) ? items.length : Number(data.total) || 0;
+      setInputImages(items);
+      setInputImageTotal(total);
+    } catch (error) {
+      console.error('Failed to fetch input images:', error);
+      alert('Error: ' + error.message);
+    } finally {
+      setInputGalleryBusy(false);
     }
   };
 
@@ -223,7 +269,83 @@ export default function ImageUpload({ token }) {
     } catch (error) {
       alert('Error: ' + (error.message || 'Unknown error'));
     } finally {
+      await fetchInputImages();
       setBusy(false);
+    }
+  };
+
+  const handleReInference = async () => {
+    if (!selectedModelId) {
+      alert('Please select a person/version first.');
+      return;
+    }
+    if (selectedInputImageIds.length === 0) {
+      alert('Select at least one input image from the gallery.');
+      return;
+    }
+
+    setReInferenceBusy(true);
+    let success = 0;
+    let failed = 0;
+    try {
+      for (const imageId of selectedInputImageIds) {
+        try {
+          const response = await fetch(
+            `${apiBaseUrl}/swap?model_id=${selectedModelId}&image_id=${imageId}&enable_restore=${enableRestore ? '1' : '0'}`,
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || 'Face swap failed');
+          }
+          success += 1;
+        } catch (_error) {
+          failed += 1;
+        }
+      }
+      alert(`Re-inference completed. Success: ${success}, Failed: ${failed}`);
+    } finally {
+      setReInferenceBusy(false);
+    }
+  };
+
+  const deleteInputImages = async (ids) => {
+    if (ids.length === 0) return;
+    setInputDeleteBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/images`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to delete input images');
+      }
+
+      const payload = await response.json();
+      const deletedInput = Number(payload?.deleted_input) || 0;
+      const deletedGenerated = Number(payload?.deleted_generated) || 0;
+      const deletedSet = new Set(ids);
+      setSelectedInputImageIds((prev) => prev.filter((id) => !deletedSet.has(id)));
+
+      const nextTotal = Math.max(0, inputImageTotal - deletedInput);
+      const totalPages = Math.max(1, Math.ceil(nextTotal / inputImagePageSize));
+      const nextPage = Math.min(inputImagePage, totalPages);
+      setInputImagePage(nextPage);
+      await fetchInputImages({ page: nextPage });
+      alert(`Deleted ${deletedInput} input image(s) and ${deletedGenerated} generated result(s).`);
+    } catch (error) {
+      console.error('Failed to delete input images:', error);
+      alert('Error: ' + error.message);
+    } finally {
+      setInputDeleteBusy(false);
     }
   };
 
@@ -274,7 +396,7 @@ export default function ImageUpload({ token }) {
   const pendingCount = targetImages.filter(
     (item) => item.status === 'idle' || item.status === 'uploading' || item.status === 'swapping'
   ).length;
-  const controlsDisabled = busy || videoBusy;
+  const controlsDisabled = busy || videoBusy || reInferenceBusy || inputDeleteBusy;
 
   const statusText = (status) => {
     if (status === 'uploading') return 'Uploading';
@@ -421,6 +543,131 @@ export default function ImageUpload({ token }) {
 
       {busy && <p>Processing queued images...</p>}
       {videoBusy && <p>Processing video...</p>}
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Input Image Gallery</h3>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            className="btn"
+            onClick={() => {
+              const pageIds = inputImages.map((item) => item.id);
+              setSelectedInputImageIds((prev) => {
+                const next = new Set(prev);
+                pageIds.forEach((id) => next.add(id));
+                return Array.from(next);
+              });
+            }}
+            disabled={inputImages.length === 0 || inputGalleryBusy || inputDeleteBusy || reInferenceBusy}
+          >
+            Select all (page)
+          </button>
+          <button
+            className="btn"
+            onClick={() => setSelectedInputImageIds([])}
+            disabled={selectedInputImageIds.length === 0 || inputDeleteBusy || reInferenceBusy}
+          >
+            Clear selection
+          </button>
+          <button
+            className="btn"
+            onClick={handleReInference}
+            disabled={selectedInputImageIds.length === 0 || !selectedModelId || controlsDisabled}
+          >
+            Re-inference selected ({selectedInputImageIds.length})
+          </button>
+          <button
+            className="btn"
+            onClick={() => deleteInputImages(selectedInputImageIds)}
+            disabled={selectedInputImageIds.length === 0 || inputDeleteBusy || reInferenceBusy}
+            style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2' }}
+          >
+            Delete selected ({selectedInputImageIds.length})
+          </button>
+        </div>
+
+        {inputGalleryBusy || inputDeleteBusy ? (
+          <p>Loading input images...</p>
+        ) : inputImages.length === 0 ? (
+          <div className="muted">No input images found.</div>
+        ) : (
+          <>
+            <div className="preview-grid">
+              {inputImages.map((item) => (
+                <div key={item.id} className="preview-card">
+                  <img
+                    src={`data:image/jpeg;base64,${item.data}`}
+                    alt={item.filename || `Input #${item.id}`}
+                    className="preview-img"
+                  />
+                  <div className="preview-meta">
+                    <span className="preview-name">#{item.id} {item.filename}</span>
+                    <input
+                      type="checkbox"
+                      checked={selectedInputImageIds.includes(item.id)}
+                      onChange={() =>
+                        setSelectedInputImageIds((prev) =>
+                          prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id]
+                        )
+                      }
+                      disabled={inputDeleteBusy || reInferenceBusy}
+                    />
+                  </div>
+                  <button
+                    className="btn"
+                    onClick={() => deleteInputImages([item.id])}
+                    disabled={inputDeleteBusy || reInferenceBusy}
+                    style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2', padding: '6px 10px' }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+              <div className="muted">
+                Page {inputImagePage} / {Math.max(1, Math.ceil(inputImageTotal / inputImagePageSize))} ({inputImageTotal} total)
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <label className="muted" htmlFor="input-page-size">Per page</label>
+                <select
+                  id="input-page-size"
+                  value={inputImagePageSize}
+                  onChange={(event) => {
+                    setInputImagePageSize(Number(event.target.value));
+                    setInputImagePage(1);
+                  }}
+                  disabled={inputGalleryBusy || inputDeleteBusy || reInferenceBusy}
+                  style={{ width: 90 }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+                <button
+                  className="btn"
+                  onClick={() => setInputImagePage((prev) => Math.max(1, prev - 1))}
+                  disabled={inputGalleryBusy || inputDeleteBusy || reInferenceBusy || inputImagePage <= 1}
+                >
+                  Previous
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => setInputImagePage((prev) => prev + 1)}
+                  disabled={
+                    inputGalleryBusy ||
+                    inputDeleteBusy ||
+                    reInferenceBusy ||
+                    inputImagePage >= Math.max(1, Math.ceil(inputImageTotal / inputImagePageSize))
+                  }
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

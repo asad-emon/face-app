@@ -125,8 +125,14 @@ function serializeFaceModel(model) {
   };
 }
 
-function serializeInputImage(image) {
-  return { id: image.id, filename: image.filename, owner_id: image.owner_id };
+function serializeInputImage(image, options = {}) {
+  const includeData = Boolean(options.includeData);
+  return {
+    id: image.id,
+    filename: image.filename,
+    owner_id: image.owner_id,
+    data: includeData && image.data ? Buffer.from(image.data).toString("base64") : undefined,
+  };
 }
 
 function serializeGeneratedImage(image) {
@@ -649,6 +655,113 @@ app.post("/images", requireAuth, upload.single("file"), async (req, res) => {
     owner_id: req.user.id,
   });
   return res.json(serializeInputImage(image));
+});
+
+app.get("/images", requireAuth, async (req, res) => {
+  const parsedSkip = Number(req.query.skip);
+  const parsedLimit = Number(req.query.limit);
+  const skip = Number.isInteger(parsedSkip) && parsedSkip >= 0 ? parsedSkip : 0;
+  const limit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 12;
+  const includeData = parseBoolean(req.query.include_data, true);
+
+  const { count, rows } = await InputImage.findAndCountAll({
+    where: { owner_id: req.user.id },
+    order: [["id", "DESC"]],
+    offset: skip,
+    limit,
+  });
+
+  return res.json({
+    items: rows.map((row) => serializeInputImage(row, { includeData })),
+    total: count,
+    skip,
+    limit,
+  });
+});
+
+app.delete("/images/:id", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid image id" });
+  }
+
+  const result = await sequelize.transaction(async (transaction) => {
+    const inputImage = await InputImage.findOne({
+      where: { id, owner_id: req.user.id },
+      transaction,
+    });
+    if (!inputImage) {
+      return null;
+    }
+
+    const deletedGenerated = await GeneratedImage.destroy({
+      where: {
+        owner_id: req.user.id,
+        input_image_id: id,
+      },
+      transaction,
+    });
+    const deletedInput = await InputImage.destroy({
+      where: { id, owner_id: req.user.id },
+      transaction,
+    });
+
+    return { deleted_input: deletedInput, deleted_generated: deletedGenerated };
+  });
+
+  if (!result) {
+    return res.status(404).json({ detail: "Image not found" });
+  }
+
+  return res.json(result);
+});
+
+app.delete("/images", requireAuth, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+
+  if (ids.length === 0) {
+    return res.status(400).json({ detail: "ids must be a non-empty array" });
+  }
+
+  const uniqueIds = [...new Set(ids)];
+  const result = await sequelize.transaction(async (transaction) => {
+    const existingInputImages = await InputImage.findAll({
+      where: {
+        owner_id: req.user.id,
+        id: { [Op.in]: uniqueIds },
+      },
+      attributes: ["id"],
+      transaction,
+    });
+    const existingIds = existingInputImages.map((item) => item.id);
+
+    if (existingIds.length === 0) {
+      return { deleted_input: 0, deleted_generated: 0 };
+    }
+
+    const deletedGenerated = await GeneratedImage.destroy({
+      where: {
+        owner_id: req.user.id,
+        input_image_id: { [Op.in]: existingIds },
+      },
+      transaction,
+    });
+    const deletedInput = await InputImage.destroy({
+      where: {
+        owner_id: req.user.id,
+        id: { [Op.in]: existingIds },
+      },
+      transaction,
+    });
+
+    return { deleted_input: deletedInput, deleted_generated: deletedGenerated };
+  });
+
+  return res.json(result);
 });
 
 app.get("/images/generated", requireAuth, async (req, res) => {
