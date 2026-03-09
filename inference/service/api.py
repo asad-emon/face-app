@@ -112,11 +112,13 @@ def create_app() -> FastAPI:
     async def swap_remote(
         model_id: str = Form(...),
         enable_restore: str = Form("0"),
+        preserve_expression: str = Form("1"),
         model_file: UploadFile = File(...),
         target_image: UploadFile = File(...),
     ):
         del model_id
         restore_enabled = _parse_form_bool(enable_restore)
+        preserve_expression_enabled = _parse_form_bool(preserve_expression)
         model_bytes = await model_file.read()
         target_bytes = await target_image.read()
 
@@ -129,6 +131,7 @@ def create_app() -> FastAPI:
             with timed_log(logger, "parse_model_file"):
                 tensors = load_safetensor(model_bytes)
                 source_embedding = tensors.get("embedding")
+                source_expression_template = tensors.get("source_expression_template")
         except Exception as exc:
             logger.warning(
                 "invalid_model_file",
@@ -154,6 +157,8 @@ def create_app() -> FastAPI:
                 target_pil,
                 source_embedding,
                 enable_restore=restore_enabled,
+                preserve_source_expression=preserve_expression_enabled,
+                source_expression_template=source_expression_template,
             )
         buffered = io.BytesIO()
         with timed_log(logger, "encode_output_image"):
@@ -166,6 +171,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="No files provided")
 
         embeddings = []
+        source_expression_template = None
         with timed_log(logger, "embedding_batch", file_count=len(files)):
             for upload in files:
                 data = await upload.read()
@@ -177,26 +183,33 @@ def create_app() -> FastAPI:
                 except Exception:
                     continue
 
-                embedding = swap_service.extract_embedding(image)
+                embedding, expression_template = swap_service.extract_face_features(image)
                 if embedding is not None:
                     embeddings.append(embedding)
+                    if source_expression_template is None and expression_template is not None:
+                        source_expression_template = expression_template
 
         if not embeddings:
             raise HTTPException(status_code=400, detail="No faces found in uploaded images")
 
         avg_embedding = np.mean(embeddings, axis=0)
-        tensor_bytes = save_safetensor({"embedding": avg_embedding})
+        tensors = {"embedding": avg_embedding.astype(np.float32)}
+        if source_expression_template is not None:
+            tensors["source_expression_template"] = source_expression_template.astype(np.float32)
+        tensor_bytes = save_safetensor(tensors)
         return Response(content=tensor_bytes, media_type="application/octet-stream")
 
     @app.post("/swap-remote-video")
     async def swap_remote_video(
         model_id: str = Form(...),
         enable_restore: str = Form("0"),
+        preserve_expression: str = Form("1"),
         model_file: UploadFile = File(...),
         target_video: UploadFile = File(...),
     ):
         del model_id
         restore_enabled = _parse_form_bool(enable_restore)
+        preserve_expression_enabled = _parse_form_bool(preserve_expression)
         model_bytes = await model_file.read()
         target_bytes = await target_video.read()
 
@@ -209,6 +222,7 @@ def create_app() -> FastAPI:
             with timed_log(logger, "parse_model_file_video"):
                 tensors = load_safetensor(model_bytes)
                 source_embedding = tensors.get("embedding")
+                source_expression_template = tensors.get("source_expression_template")
         except Exception as exc:
             logger.warning(
                 "invalid_model_file_video",
@@ -272,6 +286,8 @@ def create_app() -> FastAPI:
                         frame,
                         source_embedding,
                         enable_restore=restore_enabled,
+                        preserve_source_expression=preserve_expression_enabled,
+                        source_expression_template=source_expression_template,
                     )
                     writer.write(swapped)
                     frame_count += 1

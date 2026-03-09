@@ -72,7 +72,76 @@ class FaceSwapService:
         mask = cv2.GaussianBlur(mask, (feather * 2 + 1, feather * 2 + 1), 0)
         return mask[..., None]
 
-    def extract_embedding(self, pil_img: Image.Image):
+    @staticmethod
+    def _build_expression_template(face) -> Optional[np.ndarray]:
+        kps = getattr(face, "kps", None)
+        bbox = getattr(face, "bbox", None)
+        if kps is None or bbox is None:
+            return None
+        if len(kps) < 5:
+            return None
+
+        x1, y1, x2, y2 = bbox.astype(np.float32)
+        width = max(1.0, x2 - x1)
+        height = max(1.0, y2 - y1)
+        rel = np.empty((5, 2), dtype=np.float32)
+        rel[:, 0] = (kps[:5, 0] - x1) / width
+        rel[:, 1] = (kps[:5, 1] - y1) / height
+        return np.clip(rel, 0.0, 1.0)
+
+    def _apply_source_expression(
+        self,
+        img_bgr: np.ndarray,
+        face,
+        source_expression_template: Optional[np.ndarray],
+        strength: float = 0.75,
+    ) -> np.ndarray:
+        if source_expression_template is None:
+            return img_bgr
+        target_kps = getattr(face, "kps", None)
+        if target_kps is None or len(target_kps) < 5:
+            return img_bgr
+
+        x1, y1, x2, y2 = self._enlarge_box(face.bbox.astype(int), img_bgr.shape, scale=1.35)
+        roi = img_bgr[y1:y2, x1:x2]
+        if roi.size == 0:
+            return img_bgr
+
+        h, w = roi.shape[:2]
+        if h < 8 or w < 8:
+            return img_bgr
+
+        source_pts = source_expression_template[:5].astype(np.float32).copy()
+        source_pts[:, 0] *= w
+        source_pts[:, 1] *= h
+        target_pts = target_kps[:5].astype(np.float32).copy()
+        target_pts[:, 0] -= x1
+        target_pts[:, 1] -= y1
+
+        desired_pts = target_pts + (source_pts - target_pts) * np.clip(strength, 0.0, 1.0)
+        transform, _ = cv2.estimateAffinePartial2D(
+            target_pts,
+            desired_pts,
+            method=cv2.RANSAC,
+            ransacReprojThreshold=3.0,
+        )
+        if transform is None:
+            return img_bgr
+
+        warped = cv2.warpAffine(
+            roi,
+            transform,
+            (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT_101,
+        )
+        feather = max(8, min(25, min(h, w) // 10))
+        mask = self._create_feather_mask(h, w, feather=feather)
+        blended = warped.astype(np.float32) * mask + roi.astype(np.float32) * (1 - mask)
+        img_bgr[y1:y2, x1:x2] = blended.clip(0, 255).astype(np.uint8)
+        return img_bgr
+
+    def extract_face_features(self, pil_img: Image.Image):
         img_rgb = np.array(pil_img)
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
         self._registry.prepare_face_analyzer_for_image(img_bgr.shape)
@@ -84,14 +153,21 @@ class FaceSwapService:
         ):
             faces = self._registry.get_face_analyzer().get(img_bgr)
         if not faces:
-            return None
-        return faces[0].normed_embedding
+            return None, None
+        primary_face = faces[0]
+        return primary_face.normed_embedding, self._build_expression_template(primary_face)
+
+    def extract_embedding(self, pil_img: Image.Image):
+        embedding, _ = self.extract_face_features(pil_img)
+        return embedding
 
     def swap_with_embedding(
         self,
         pil_img: Image.Image,
         source_embedding: np.ndarray,
         enable_restore: bool = False,
+        preserve_source_expression: bool = False,
+        source_expression_template: Optional[np.ndarray] = None,
     ) -> Image.Image:
         img_rgb = np.array(pil_img)
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
@@ -100,6 +176,8 @@ class FaceSwapService:
             img_bgr,
             source_embedding,
             enable_restore=enable_restore,
+            preserve_source_expression=preserve_source_expression,
+            source_expression_template=source_expression_template,
         )
 
         return Image.fromarray(cv2.cvtColor(swapped_bgr, cv2.COLOR_BGR2RGB))
@@ -109,6 +187,8 @@ class FaceSwapService:
         img_bgr: np.ndarray,
         source_embedding: np.ndarray,
         enable_restore: bool = False,
+        preserve_source_expression: bool = False,
+        source_expression_template: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         img_bgr = np.ascontiguousarray(img_bgr)
 
@@ -144,6 +224,12 @@ class FaceSwapService:
                     continue
 
                 img_bgr = swapper.get(img_bgr, face, source_face, paste_back=True)
+                if preserve_source_expression:
+                    img_bgr = self._apply_source_expression(
+                        img_bgr,
+                        face,
+                        source_expression_template=source_expression_template,
+                    )
 
                 if not enable_restore:
                     continue
