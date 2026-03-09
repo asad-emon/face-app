@@ -679,7 +679,7 @@ app.get("/images", requireAuth, async (req, res) => {
   });
 });
 
-app.delete("/images/:id", requireAuth, async (req, res) => {
+app.delete("/images/:id(\\d+)", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!id) {
     return res.status(400).json({ detail: "Invalid image id" });
@@ -784,7 +784,7 @@ app.get("/images/generated", requireAuth, async (req, res) => {
   });
 });
 
-app.delete("/images/generated/:id", requireAuth, async (req, res) => {
+app.delete("/images/generated/:id(\\d+)", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!id) {
     return res.status(400).json({ detail: "Invalid image id" });
