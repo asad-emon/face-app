@@ -33,6 +33,58 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function pollGeneratedVideoContent(videoId, token, options = {}) {
+  const attempts = Number.isInteger(options.attempts) ? options.attempts : 120;
+  const delayMs = Number.isInteger(options.delayMs) ? options.delayMs : 2000;
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const statusResponse = await fetch(`${apiBaseUrl}/videos/generated/${videoId}/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (statusResponse.ok) {
+        const statusPayload = await statusResponse.json();
+        const percent = Number(statusPayload?.progress_percent);
+        if (onProgress && Number.isFinite(percent)) {
+          onProgress(Math.max(0, Math.min(100, percent)));
+        }
+        if (!statusPayload?.processing && statusPayload?.has_content) {
+          const contentResponse = await fetch(`${apiBaseUrl}/videos/generated/${videoId}/content`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (contentResponse.ok) {
+            return contentResponse.blob();
+          }
+        }
+      }
+    } catch (_err) {
+      // noop, fall back to content polling
+    }
+
+    const response = await fetch(`${apiBaseUrl}/videos/generated/${videoId}/content`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 409) {
+      await wait(delayMs);
+      continue;
+    }
+    if (!response.ok) {
+      let detail = 'Failed to load generated video';
+      try {
+        const data = await response.json();
+        detail = data?.detail || detail;
+      } catch (_err) {
+        // noop
+      }
+      throw new Error(detail);
+    }
+    return response.blob();
+  }
+
+  throw new Error('Video processing is taking longer than expected. Please try again.');
+}
+
 export default function ImageUpload({ token }) {
   const [targetImages, setTargetImages] = useState([]);
   const [models, setModels] = useState([]);
@@ -43,8 +95,10 @@ export default function ImageUpload({ token }) {
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState('');
   const [videoResultUrl, setVideoResultUrl] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
   const [videoBusy, setVideoBusy] = useState(false);
   const [videoError, setVideoError] = useState('');
+  const [videoProgress, setVideoProgress] = useState(0);
   const [inputImages, setInputImages] = useState([]);
   const [selectedInputImageIds, setSelectedInputImageIds] = useState([]);
   const [inputImageTotal, setInputImageTotal] = useState(0);
@@ -212,6 +266,7 @@ export default function ImageUpload({ token }) {
       setVideoResultUrl('');
     }
     setVideoError('');
+    setVideoProgress(0);
     if (!file) {
       setVideoFile(null);
       setVideoPreviewUrl('');
@@ -219,6 +274,31 @@ export default function ImageUpload({ token }) {
     }
     setVideoFile(file);
     setVideoPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const clearVideoInput = () => {
+    setVideoSelection(null);
+    setVideoUrl('');
+  };
+
+  const buildVideoFileFromUrl = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video URL (${response.status})`);
+    }
+    const blob = await response.blob();
+    const contentType = blob.type || 'video/mp4';
+    let filename = 'remote-video.mp4';
+    try {
+      const parsed = new URL(url);
+      const lastPart = parsed.pathname.split('/').filter(Boolean).pop();
+      if (lastPart) {
+        filename = lastPart;
+      }
+    } catch (_err) {
+      // noop
+    }
+    return new File([blob], filename, { type: contentType });
   };
 
   const handleSwap = async () => {
@@ -439,17 +519,24 @@ export default function ImageUpload({ token }) {
       alert('Please select a person/version first.');
       return;
     }
-    if (!videoFile) {
-      alert('Please select a target video first.');
+    if (!videoFile && !videoUrl) {
+      alert('Please select a target video or paste a video URL first.');
       return;
     }
 
     setVideoBusy(true);
     setVideoError('');
+    setVideoProgress(0);
 
     try {
+      let fileToUpload = videoFile;
+      if (!fileToUpload && videoUrl) {
+        fileToUpload = await buildVideoFileFromUrl(videoUrl.trim());
+        setVideoSelection(fileToUpload);
+      }
+
       const formData = new FormData();
-      formData.append('file', videoFile);
+      formData.append('file', fileToUpload);
       formData.append('model_id', selectedModelId);
       formData.append('enable_restore', enableRestore ? '1' : '0');
 
@@ -464,11 +551,20 @@ export default function ImageUpload({ token }) {
         throw new Error(errorData?.detail || 'Video face swap failed');
       }
 
-      const outputBlob = await response.blob();
+      const payload = await response.json().catch(() => null);
+      const generatedVideoId = Number(payload?.id || payload?.generated_video_id);
+      if (!generatedVideoId) {
+        throw new Error('Video swap did not return a generated id');
+      }
+
+      const outputBlob = await pollGeneratedVideoContent(generatedVideoId, token, {
+        onProgress: (percent) => setVideoProgress(percent),
+      });
       if (videoResultUrl) {
         URL.revokeObjectURL(videoResultUrl);
       }
       setVideoResultUrl(URL.createObjectURL(outputBlob));
+      setVideoProgress(100);
     } catch (error) {
       setVideoError(error.message || 'Unknown error');
     } finally {
@@ -602,15 +698,38 @@ export default function ImageUpload({ token }) {
           onChange={(e) => {
             const file = e.target.files?.[0] || null;
             setVideoSelection(file);
+            if (file) {
+              setVideoUrl('');
+            }
             e.target.value = '';
           }}
           disabled={controlsDisabled}
         />
+        <div className="muted" style={{ marginTop: 8 }}>Or paste a video URL</div>
+        <input
+          type="url"
+          placeholder="https://example.com/video.mp4"
+          value={videoUrl}
+          onChange={(e) => {
+            setVideoUrl(e.target.value);
+            if (e.target.value) {
+              setVideoSelection(null);
+            }
+          }}
+          disabled={controlsDisabled}
+          style={{ width: '100%' }}
+        />
         <div className="row" style={{ marginTop: 8, gap: 8 }}>
-          <button onClick={handleVideoSwap} disabled={controlsDisabled || !selectedModelId || !videoFile}>
+          <button
+            onClick={handleVideoSwap}
+            disabled={controlsDisabled || !selectedModelId || (!videoFile && !videoUrl)}
+          >
             Process Video
           </button>
-          <button onClick={() => setVideoSelection(null)} disabled={controlsDisabled || !videoFile}>
+          <button
+            onClick={() => clearVideoInput()}
+            disabled={controlsDisabled || (!videoFile && !videoUrl)}
+          >
             Clear Video
           </button>
         </div>

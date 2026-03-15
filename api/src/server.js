@@ -27,6 +27,8 @@ const ACCESS_TOKEN_EXPIRE_MINUTES = Number(
   process.env.ACCESS_TOKEN_EXPIRE_MINUTES || 300
 );
 const INFERENCE_BASE_URL = process.env.INFERENCE_BASE_URL || "";
+const API_BASE_URL = process.env.API_BASE_URL || "";
+const INFERENCE_CALLBACK_TOKEN = process.env.INFERENCE_CALLBACK_TOKEN || "";
 const SWAP_TIMEOUT_MS = Number(process.env.SWAP_TIMEOUT_MS || 600000);
 const SWAP_MAX_RETRIES = Math.max(0, Number(process.env.SWAP_MAX_RETRIES || 2));
 const SWAP_RETRY_DELAY_MS = Math.max(0, Number(process.env.SWAP_RETRY_DELAY_MS || 750));
@@ -115,6 +117,28 @@ async function requireAuth(req, res, next) {
   }
 }
 
+function requireInferenceAuth(req, res, next) {
+  if (!INFERENCE_CALLBACK_TOKEN) {
+    return next();
+  }
+  const token = req.headers["x-inference-token"];
+  if (token !== INFERENCE_CALLBACK_TOKEN) {
+    return res.status(401).json({ detail: "Unauthorized" });
+  }
+  return next();
+}
+
+function getApiBaseUrl(req) {
+  if (API_BASE_URL) {
+    return API_BASE_URL;
+  }
+  const host = req.get("host");
+  if (!host) {
+    return "";
+  }
+  return `${req.protocol}://${host}`;
+}
+
 function serializeUser(user) {
   return { id: user.id, email: user.email };
 }
@@ -161,6 +185,9 @@ function serializeGeneratedVideo(video) {
     filename: video.filename,
     mime_type: video.mime_type || "video/mp4",
     processing: Boolean(video.processing),
+    total_frames: Number(video.total_frames) || 0,
+    processed_frames: Number(video.processed_frames) || 0,
+    progress_percent: Number(video.progress_percent) || 0,
     has_content: hasBinaryData,
   };
 }
@@ -330,6 +357,61 @@ async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) {
     face_model_id: modelId,
   });
   return { outputBytes, generatedImageId: generated.id };
+}
+
+async function triggerVideoSwap({
+  generatedVideoId,
+  model,
+  video,
+  modelId,
+  enableRestore,
+  callbackUrl,
+  progressUrl,
+  callbackToken,
+}) {
+  const form = new FormData();
+  form.append("model_id", String(modelId));
+  form.append("enable_restore", enableRestore ? "1" : "0");
+  if (callbackUrl) {
+    form.append("callback_url", callbackUrl);
+  }
+  if (progressUrl) {
+    form.append("progress_url", progressUrl);
+  }
+  if (callbackToken) {
+    form.append("callback_token", callbackToken);
+  }
+  form.append("model_file", model.data, {
+    filename: "model.safetensors",
+    contentType: "application/octet-stream",
+  });
+  form.append("target_video", video.buffer, {
+    filename: video.originalname || "target.mp4",
+    contentType: video.mimetype || "video/mp4",
+  });
+
+  try {
+    const response = await axios.post(
+      `${INFERENCE_BASE_URL}/swap-remote-video`,
+      form,
+      {
+        headers: form.getHeaders(),
+        responseType: "stream",
+        timeout: 1800000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      }
+    );
+    if (response?.data?.resume) {
+      response.data.resume();
+    }
+  } catch (err) {
+    await GeneratedVideo.update(
+      { processing: false },
+      { where: { id: generatedVideoId } }
+    );
+    logApiError("triggerVideoSwap", err);
+  }
 }
 
 function enqueueSwapJob(jobId) {
@@ -1025,6 +1107,94 @@ app.delete("/images/generated", requireAuth, async (req, res) => {
   return res.json({ deleted });
 });
 
+app.post(
+  "/internal/videos/generated/:id/content",
+  requireInferenceAuth,
+  upload.single("file"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) {
+      return res.status(400).json({ detail: "Invalid video id" });
+    }
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ detail: "No video uploaded" });
+    }
+
+    const video = await GeneratedVideo.findByPk(id);
+    if (!video) {
+      return res.status(404).json({ detail: "Video not found" });
+    }
+
+    const parsedTotal = Number(req.body?.total_frames);
+    const parsedProcessed = Number(req.body?.processed_frames);
+    const parsedProgress = Number(req.body?.progress_percent);
+    const totalFrames = Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : video.total_frames;
+    const processedFrames = Number.isFinite(parsedProcessed) && parsedProcessed >= 0
+      ? parsedProcessed
+      : video.processed_frames;
+    const progressPercent = Number.isFinite(parsedProgress)
+      ? Math.max(0, Math.min(100, parsedProgress))
+      : 100;
+
+    await video.update({
+      filename: req.body?.filename || file.originalname || video.filename,
+      mime_type: req.body?.mime_type || file.mimetype || "video/mp4",
+      processing: false,
+      total_frames: totalFrames || 0,
+      processed_frames: processedFrames || 0,
+      progress_percent: progressPercent,
+      data: file.buffer,
+    });
+
+    return res.json({ id: video.id, processing: false });
+  }
+);
+
+app.post(
+  "/internal/videos/generated/:id/progress",
+  requireInferenceAuth,
+  async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) {
+      return res.status(400).json({ detail: "Invalid video id" });
+    }
+
+    const video = await GeneratedVideo.findByPk(id);
+    if (!video) {
+      return res.status(404).json({ detail: "Video not found" });
+    }
+
+    const parsedTotal = Number(req.body?.total_frames);
+    const parsedProcessed = Number(req.body?.processed_frames);
+    const parsedProgress = Number(req.body?.progress_percent);
+    const totalFrames = Number.isFinite(parsedTotal) && parsedTotal > 0 ? parsedTotal : video.total_frames;
+    const processedFrames = Number.isFinite(parsedProcessed) && parsedProcessed >= 0
+      ? parsedProcessed
+      : video.processed_frames;
+    let progressPercent = Number.isFinite(parsedProgress)
+      ? Math.max(0, Math.min(100, parsedProgress))
+      : null;
+    if (progressPercent === null && totalFrames > 0) {
+      progressPercent = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
+    }
+
+    await video.update({
+      total_frames: totalFrames || 0,
+      processed_frames: processedFrames || 0,
+      progress_percent: progressPercent ?? video.progress_percent ?? 0,
+    });
+
+    return res.json({
+      id: video.id,
+      processing: Boolean(video.processing),
+      total_frames: Number(video.total_frames) || 0,
+      processed_frames: Number(video.processed_frames) || 0,
+      progress_percent: Number(video.progress_percent) || 0,
+    });
+  }
+);
+
 app.get("/videos/generated", requireAuth, async (req, res) => {
   const parsedSkip = Number(req.query.skip);
   const parsedLimit = Number(req.query.limit);
@@ -1042,6 +1212,29 @@ app.get("/videos/generated", requireAuth, async (req, res) => {
     total: count,
     skip,
     limit,
+  });
+});
+
+app.get("/videos/generated/:id/status", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid video id" });
+  }
+
+  const video = await GeneratedVideo.findOne({
+    where: { id, owner_id: req.user.id },
+  });
+  if (!video) {
+    return res.status(404).json({ detail: "Video not found" });
+  }
+
+  return res.json({
+    id: video.id,
+    processing: Boolean(video.processing),
+    total_frames: Number(video.total_frames) || 0,
+    processed_frames: Number(video.processed_frames) || 0,
+    progress_percent: Number(video.progress_percent) || 0,
+    has_content: Boolean(video.data && Buffer.from(video.data).length > 0),
   });
 });
 
@@ -1297,52 +1490,35 @@ app.post("/swap-video", requireAuth, upload.single("file"), async (req, res) => 
       filename: video.originalname || "target.mp4",
       mime_type: video.mimetype || "video/mp4",
       processing: true,
+      total_frames: 0,
+      processed_frames: 0,
+      progress_percent: 0,
       data: Buffer.alloc(0),
       owner_id: req.user.id,
       face_model_id: modelId,
     });
 
-    const form = new FormData();
-    form.append("model_id", String(modelId));
-    form.append("enable_restore", enableRestore ? "1" : "0");
-    form.append("model_file", model.data, {
-      filename: "model.safetensors",
-      contentType: "application/octet-stream",
-    });
-    form.append("target_video", video.buffer, {
-      filename: video.originalname || "target.mp4",
-      contentType: video.mimetype || "video/mp4",
-    });
+    const apiBaseUrl = getApiBaseUrl(req);
+    if (!apiBaseUrl) {
+      return res
+        .status(500)
+        .json({ detail: "API_BASE_URL is not configured" });
+    }
+    const callbackUrl = `${apiBaseUrl}/internal/videos/generated/${generatedVideo.id}/content`;
+    const progressUrl = `${apiBaseUrl}/internal/videos/generated/${generatedVideo.id}/progress`;
 
-    const response = await axios.post(
-      `${INFERENCE_BASE_URL}/swap-remote-video`,
-      form,
-      {
-        headers: form.getHeaders(),
-        responseType: "arraybuffer",
-        timeout: 1800000,
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-      }
-    );
-
-    const outputBytes = Buffer.from(response.data);
-    const generatedFilename = `swapped-${Date.now()}.mp4`;
-    await generatedVideo.update({
-      filename: generatedFilename,
-      mime_type: "video/mp4",
-      processing: false,
-      data: outputBytes,
+    void triggerVideoSwap({
+      generatedVideoId: generatedVideo.id,
+      model,
+      video,
+      modelId,
+      enableRestore,
+      callbackUrl,
+      progressUrl,
+      callbackToken: INFERENCE_CALLBACK_TOKEN,
     });
 
-    res.setHeader("Content-Type", "video/mp4");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${generatedFilename}"`
-    );
-    res.setHeader("x-generated-video-id", String(generatedVideo.id));
-    res.setHeader("x-processing", "false");
-    return res.send(outputBytes);
+    return res.status(202).json(serializeGeneratedVideo(generatedVideo));
   } catch (err) {
     if (generatedVideo) {
       await GeneratedVideo.update(

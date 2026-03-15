@@ -5,12 +5,13 @@ import subprocess
 import tempfile
 import uuid
 from time import perf_counter
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import cv2
+import requests
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from PIL import Image
 from safetensors.numpy import load as load_safetensor, save as save_safetensor
 
@@ -65,6 +66,108 @@ def _transcode_to_h264_mp4(raw_input_path: str, output_path: str, logger) -> Non
         },
     )
     shutil.copyfile(raw_input_path, output_path)
+
+
+def _post_generated_video(
+    callback_url: str,
+    output_bytes: bytes,
+    filename: str,
+    mime_type: str,
+    callback_token: Optional[str],
+    total_frames: Optional[int],
+    processed_frames: Optional[int],
+    progress_percent: Optional[int],
+    logger,
+) -> None:
+    if not callback_url:
+        return
+
+    headers = {}
+    if callback_token:
+        headers["x-inference-token"] = callback_token
+
+    try:
+        data = {
+            "filename": filename,
+            "mime_type": mime_type,
+        }
+        if total_frames is not None:
+            data["total_frames"] = str(total_frames)
+        if processed_frames is not None:
+            data["processed_frames"] = str(processed_frames)
+        if progress_percent is not None:
+            data["progress_percent"] = str(progress_percent)
+
+        response = requests.post(
+            callback_url,
+            headers=headers,
+            data=data,
+            files={"file": (filename, output_bytes, mime_type)},
+            timeout=120,
+        )
+        if response.status_code >= 400:
+            logger.warning(
+                "callback_post_failed",
+                extra={
+                    "event": "callback_post_failed",
+                    "status_code": response.status_code,
+                    "response_tail": (response.text or "")[-500:],
+                },
+            )
+    except Exception as exc:
+        logger.warning(
+            "callback_post_error",
+            extra={"event": "callback_post_error", "error": str(exc)},
+        )
+
+
+def _post_video_progress(
+    progress_url: str,
+    processed_frames: int,
+    total_frames: Optional[int],
+    callback_token: Optional[str],
+    logger,
+) -> None:
+    if not progress_url:
+        return
+
+    headers = {}
+    if callback_token:
+        headers["x-inference-token"] = callback_token
+
+    progress_percent = None
+    if total_frames and total_frames > 0:
+        progress_percent = min(100, round((processed_frames / total_frames) * 100))
+
+    data = {
+        "processed_frames": str(processed_frames),
+    }
+    if total_frames is not None:
+        data["total_frames"] = str(total_frames)
+    if progress_percent is not None:
+        data["progress_percent"] = str(progress_percent)
+
+    try:
+        response = requests.post(
+            progress_url,
+            headers=headers,
+            data=data,
+            timeout=30,
+        )
+        if response.status_code >= 400:
+            logger.warning(
+                "progress_post_failed",
+                extra={
+                    "event": "progress_post_failed",
+                    "status_code": response.status_code,
+                    "response_tail": (response.text or "")[-500:],
+                },
+            )
+    except Exception as exc:
+        logger.warning(
+            "progress_post_error",
+            extra={"event": "progress_post_error", "error": str(exc)},
+        )
 
 
 def create_app() -> FastAPI:
@@ -204,6 +307,9 @@ def create_app() -> FastAPI:
         model_id: str = Form(...),
         enable_restore: str = Form("0"),
         preserve_expression: str = Form("1"),
+        callback_url: Optional[str] = Form(None),
+        progress_url: Optional[str] = Form(None),
+        callback_token: Optional[str] = Form(None),
         model_file: UploadFile = File(...),
         target_video: UploadFile = File(...),
     ):
@@ -259,6 +365,9 @@ def create_app() -> FastAPI:
             fps = cap.get(cv2.CAP_PROP_FPS)
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            if total_frames <= 0:
+                total_frames = None
 
             if width <= 0 or height <= 0:
                 raise HTTPException(status_code=400, detail="Unable to read video dimensions")
@@ -277,6 +386,18 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=500, detail="Failed to initialize video writer")
 
             frame_count = 0
+            report_every = 30
+            if total_frames:
+                report_every = max(1, int(total_frames * 0.02))
+            last_reported = 0
+            if progress_url:
+                _post_video_progress(
+                    progress_url=progress_url,
+                    processed_frames=0,
+                    total_frames=total_frames,
+                    callback_token=callback_token,
+                    logger=logger,
+                )
             with timed_log(logger, "swap_remote_video_inference", restore_enabled=restore_enabled):
                 while True:
                     ok, frame = cap.read()
@@ -291,6 +412,15 @@ def create_app() -> FastAPI:
                     )
                     writer.write(swapped)
                     frame_count += 1
+                    if progress_url and (frame_count == total_frames or frame_count - last_reported >= report_every):
+                        _post_video_progress(
+                            progress_url=progress_url,
+                            processed_frames=frame_count,
+                            total_frames=total_frames,
+                            callback_token=callback_token,
+                            logger=logger,
+                        )
+                        last_reported = frame_count
 
             if frame_count == 0:
                 raise HTTPException(status_code=400, detail="Video has no readable frames")
@@ -313,6 +443,20 @@ def create_app() -> FastAPI:
                     "frame_count": frame_count,
                 },
             )
+            if callback_url:
+                with timed_log(logger, "post_output_video", frame_count=frame_count):
+                    _post_generated_video(
+                        callback_url=callback_url,
+                        output_bytes=output_bytes,
+                        filename=f"swapped-{uuid.uuid4().hex}.mp4",
+                        mime_type="video/mp4",
+                        callback_token=callback_token,
+                        total_frames=total_frames,
+                        processed_frames=frame_count,
+                        progress_percent=100,
+                        logger=logger,
+                    )
+                return JSONResponse(content={"status": "posted"}, status_code=202)
             return Response(content=output_bytes, media_type="video/mp4")
         except HTTPException:
             raise

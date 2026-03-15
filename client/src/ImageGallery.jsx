@@ -28,6 +28,8 @@ export default function ImageGallery({ token, isActive = false }) {
   const [previewId, setPreviewId] = useState(null);
   const [videoSources, setVideoSources] = useState({});
   const [loadingVideoIds, setLoadingVideoIds] = useState([]);
+  const [statusLoadingIds, setStatusLoadingIds] = useState([]);
+  const [zoomLevel, setZoomLevel] = useState(1);
   const videoSourcesRef = useRef({});
 
   const fetchGallery = async (options = {}) => {
@@ -143,6 +145,52 @@ export default function ImageGallery({ token, isActive = false }) {
     }
   };
 
+  const deleteSourceImage = async (inputImageId) => {
+    if (!inputImageId) return;
+    setDeleting(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/images/${inputImageId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        let detail = 'Failed to delete source image';
+        try {
+          const data = await response.json();
+          detail = data?.detail || detail;
+        } catch (_err) {
+          // noop
+        }
+        throw new Error(detail);
+      }
+
+      const payload = await response.json();
+      const deletedGenerated = Number(payload?.deleted_generated) || 0;
+      const deletedInput = Number(payload?.deleted_input) || 0;
+      const removedIds = new Set(
+        images.filter((item) => item.input_image_id === inputImageId).map((item) => item.id)
+      );
+      setSelectedImageIds((prev) => prev.filter((id) => !removedIds.has(id)));
+      if (previewId !== null && removedIds.has(previewId)) {
+        setPreviewId(null);
+      }
+
+      const nextTotal = Math.max(0, imageTotal - deletedGenerated);
+      const totalPages = Math.max(1, Math.ceil(nextTotal / imagePageSize));
+      const nextPage = Math.min(imagePage, totalPages);
+      setImagePage(nextPage);
+      await fetchGallery({ imagePage: nextPage });
+      if (deletedInput > 0) {
+        alert('Deleted source image and its generated results.');
+      }
+    } catch (error) {
+      console.error('Failed to delete source image:', error);
+      alert('Error: ' + error.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const deleteVideos = async (ids) => {
     if (ids.length === 0) return;
     setDeleting(true);
@@ -237,6 +285,34 @@ export default function ImageGallery({ token, isActive = false }) {
     }
   };
 
+  const refreshVideoStatus = async (video) => {
+    if (!video) return;
+    setStatusLoadingIds((prev) => (prev.includes(video.id) ? prev : [...prev, video.id]));
+    try {
+      const response = await fetch(`${apiBaseUrl}/videos/generated/${video.id}/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        let detail = 'Failed to fetch video status';
+        try {
+          const data = await response.json();
+          detail = data?.detail || detail;
+        } catch (_err) {
+          // noop
+        }
+        throw new Error(detail);
+      }
+      const payload = await response.json();
+      setVideos((prev) =>
+        prev.map((item) => (item.id === video.id ? { ...item, ...payload } : item))
+      );
+    } catch (error) {
+      alert('Error: ' + error.message);
+    } finally {
+      setStatusLoadingIds((prev) => prev.filter((id) => id !== video.id));
+    }
+  };
+
   const previewIndex = images.findIndex((image) => image.id === previewId);
   const preview = previewIndex >= 0 ? images[previewIndex] : null;
 
@@ -244,12 +320,14 @@ export default function ImageGallery({ token, isActive = false }) {
     if (images.length === 0 || previewIndex < 0) return;
     const nextIndex = (previewIndex - 1 + images.length) % images.length;
     setPreviewId(images[nextIndex].id);
+    setZoomLevel(1);
   };
 
   const showNext = () => {
     if (images.length === 0 || previewIndex < 0) return;
     const nextIndex = (previewIndex + 1) % images.length;
     setPreviewId(images[nextIndex].id);
+    setZoomLevel(1);
   };
 
   useEffect(() => {
@@ -278,6 +356,10 @@ export default function ImageGallery({ token, isActive = false }) {
       Object.values(videoSourcesRef.current).forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
+
+  const handleZoomIn = () => setZoomLevel((prev) => Math.min(3, Math.round((prev + 0.25) * 100) / 100));
+  const handleZoomOut = () => setZoomLevel((prev) => Math.max(1, Math.round((prev - 0.25) * 100) / 100));
+  const handleZoomReset = () => setZoomLevel(1);
 
   return (
     <div className="card">
@@ -457,20 +539,36 @@ export default function ImageGallery({ token, isActive = false }) {
                         className="preview-img"
                       />
                     ) : video.processing ? (
-                      <div className="muted">Video is still processing.</div>
+                      <div className="muted">
+                        Video is still processing{Number.isFinite(video.progress_percent)
+                          ? ` (${video.progress_percent}%)`
+                          : ''}.
+                      </div>
                     ) : !video.has_content ? (
                       <div className="muted">No playable video data yet.</div>
                     ) : (
-                      <button
-                        className="btn"
-                        onClick={() => loadVideoSource(video)}
-                        disabled={loadingVideoIds.includes(video.id)}
-                      >
-                        {loadingVideoIds.includes(video.id) ? 'Loading...' : 'Load Video'}
-                      </button>
+                      <div className="muted">Ready to load.</div>
                     )}
                     <div className="muted">Model: {modelLabel(video.face_model_id)}</div>
                     <div className="muted">Processing: {video.processing ? 'Yes' : 'No'}</div>
+                    <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                      <button
+                        className="btn"
+                        onClick={() => refreshVideoStatus(video)}
+                        disabled={statusLoadingIds.includes(video.id) || busy || deleting}
+                      >
+                        {statusLoadingIds.includes(video.id) ? 'Refreshing...' : 'Refresh Status'}
+                      </button>
+                      {!video.processing && video.has_content && !videoSources[video.id] && (
+                        <button
+                          className="btn"
+                          onClick={() => loadVideoSource(video)}
+                          disabled={loadingVideoIds.includes(video.id)}
+                        >
+                          {loadingVideoIds.includes(video.id) ? 'Loading...' : 'Load Video'}
+                        </button>
+                      )}
+                    </div>
                     <button
                       className="btn"
                       onClick={() => deleteVideos([video.id])}
@@ -528,12 +626,19 @@ export default function ImageGallery({ token, isActive = false }) {
       )}
 
       {preview && (
-        <div className="modal" onClick={() => setPreviewId(null)}>
+        <div
+          className="modal"
+          onClick={() => {
+            setPreviewId(null);
+            setZoomLevel(1);
+          }}
+        >
           <button
             className="modal-close"
             onClick={(event) => {
               event.stopPropagation();
               setPreviewId(null);
+              setZoomLevel(1);
             }}
           >
             &times;
@@ -553,6 +658,10 @@ export default function ImageGallery({ token, isActive = false }) {
             alt="Preview"
             className="modal-content"
             onClick={(event) => event.stopPropagation()}
+            style={{
+              transform: `scale(${zoomLevel})`,
+              transition: 'transform 120ms ease-out',
+            }}
           />
           <button
             className="btn"
@@ -569,6 +678,23 @@ export default function ImageGallery({ token, isActive = false }) {
             style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}
           >
             {previewIndex + 1} / {images.length}
+          </div>
+          <div
+            className="row"
+            style={{ position: 'absolute', bottom: 16, right: 16, gap: 8, alignItems: 'center' }}
+          >
+            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomOut(); }}>
+              -
+            </button>
+            <div className="muted" style={{ minWidth: 60, textAlign: 'center' }}>
+              {Math.round(zoomLevel * 100)}%
+            </div>
+            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomIn(); }}>
+              +
+            </button>
+            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomReset(); }}>
+              Reset
+            </button>
           </div>
           <button
             className="btn"
@@ -587,6 +713,24 @@ export default function ImageGallery({ token, isActive = false }) {
             }}
           >
             Delete image
+          </button>
+          <button
+            className="btn"
+            onClick={(event) => {
+              event.stopPropagation();
+              deleteSourceImage(preview.input_image_id);
+            }}
+            disabled={busy || deleting || !preview.input_image_id}
+            style={{
+              position: 'absolute',
+              top: 20,
+              right: 20,
+              background: '#4a2525',
+              borderColor: '#7a3a3a',
+              color: '#ffc2c2',
+            }}
+          >
+            Delete source image
           </button>
         </div>
       )}

@@ -161,6 +161,21 @@ export const GeneratedVideo = sequelize.define(
       allowNull: false,
       defaultValue: true,
     },
+    total_frames: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    processed_frames: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    progress_percent: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
     data: {
       type: DataTypes.BLOB("long"),
       allowNull: false,
@@ -312,6 +327,27 @@ export async function initDb() {
       defaultValue: false,
     });
     await sequelize.query("UPDATE generated_videos SET processing = false WHERE processing IS NULL");
+  }
+  if (!generatedVideoTable.total_frames) {
+    await queryInterface.addColumn("generated_videos", "total_frames", {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    });
+  }
+  if (!generatedVideoTable.processed_frames) {
+    await queryInterface.addColumn("generated_videos", "processed_frames", {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    });
+  }
+  if (!generatedVideoTable.progress_percent) {
+    await queryInterface.addColumn("generated_videos", "progress_percent", {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    });
   }
   if (!generatedVideoTable.face_model_id) {
     await queryInterface.addColumn("generated_videos", "face_model_id", {
