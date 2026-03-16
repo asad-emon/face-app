@@ -1,16 +1,45 @@
 import React, { useState, useEffect, useRef } from 'react';
-import './styles.css';
+import {
+  Box,
+  Button,
+  Checkbox,
+  Divider,
+  Heading,
+  HStack,
+  IconButton,
+  Image,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalOverlay,
+  Select,
+  SimpleGrid,
+  Stack,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
+  Text,
+} from '@chakra-ui/react';
+import {
+  AddIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  DeleteIcon,
+  MinusIcon,
+  RepeatIcon,
+} from '@chakra-ui/icons';
 import { apiBaseUrl } from './utils';
+import { useApp } from './contexts/AppContext.jsx';
 
 const IMAGE_PAGE_SIZE = 12;
 const VIDEO_PAGE_SIZE = 8;
 const PAGE_SIZE_OPTIONS = [8, 12, 24, 48];
 
-function GalleryTab({ active, onClick, children }) {
-  return <button className={active ? 'tab active' : 'tab'} onClick={onClick}>{children}</button>;
-}
-
-export default function ImageGallery({ token, isActive = false }) {
+export default function ImageGallery({ isActive = false }) {
+  const { token } = useApp();
   const [activeType, setActiveType] = useState('images');
   const [images, setImages] = useState([]);
   const [videos, setVideos] = useState([]);
@@ -333,6 +362,12 @@ export default function ImageGallery({ token, isActive = false }) {
     setZoomLevel(1);
   };
 
+  const openPreview = (imageId) => {
+    if (!imageId) return;
+    setPreviewId(imageId);
+    setZoomLevel(1);
+  };
+
   useEffect(() => {
     if (token && isActive) {
       fetchGallery();
@@ -393,387 +428,406 @@ export default function ImageGallery({ token, isActive = false }) {
   const handleZoomOut = () => setZoomLevel((prev) => Math.max(1, Math.round((prev - 0.25) * 100) / 100));
   const handleZoomReset = () => setZoomLevel(1);
 
+  const tabIndex = activeType === 'images' ? 0 : 1;
+
   return (
-    <div className="card">
-      <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Generated Media</h2>
-        <div className="row" style={{ gap: 8 }}>
-          <GalleryTab active={activeType === 'images'} onClick={() => setActiveType('images')}>Images</GalleryTab>
-          <GalleryTab active={activeType === 'videos'} onClick={() => setActiveType('videos')}>Videos</GalleryTab>
-          <button className="btn" onClick={() => fetchGallery()} disabled={busy || deleting}>Refresh</button>
-        </div>
-      </div>
+    <Box
+      bg="rgba(17, 22, 34, 0.9)"
+      border="1px solid"
+      borderColor="#1d2434"
+      borderRadius="20px"
+      p={{ base: 4, md: 6 }}
+      boxShadow="0 10px 30px rgba(0,0,0,0.35)"
+    >
+      <Stack spacing={5}>
+        <HStack justify="space-between" align="center" flexWrap="wrap">
+          <Box>
+            <Heading size="md">Generated Media</Heading>
+            <Text color="gray.500">Review outputs and manage your gallery.</Text>
+          </Box>
+          <Button onClick={() => fetchGallery()} isDisabled={busy || deleting} variant="outline">
+            Refresh
+          </Button>
+        </HStack>
 
-      {activeType === 'images' && (
-        <>
-          <div className="row" style={{ gap: 8 }}>
-            <button
-              className="btn"
-              onClick={() => setSelectedImageIds(images.map((item) => item.id))}
-              disabled={images.length === 0 || busy || deleting}
-            >
-              Select all
-            </button>
-            <button
-              className="btn"
-              onClick={() => setSelectedImageIds([])}
-              disabled={selectedImageIds.length === 0 || busy || deleting}
-            >
-              Clear
-            </button>
-            <button
-              className="btn"
-              onClick={() => deleteImages(selectedImageIds)}
-              disabled={selectedImageIds.length === 0 || busy || deleting}
-              style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2' }}
-            >
-              Delete selected ({selectedImageIds.length})
-            </button>
-          </div>
-          {busy || deleting ? (
-            <p>Loading...</p>
-          ) : images.length === 0 ? (
-            <div className="muted">No images generated yet.</div>
-          ) : (
-            <>
-              <div className="grid">
-                {images.map((image) => (
-                  <div key={image.id} className="card" style={{ padding: 12 }}>
-                    <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedImageIds.includes(image.id)}
-                          onChange={() =>
-                            setSelectedImageIds((prev) =>
-                              prev.includes(image.id) ? prev.filter((id) => id !== image.id) : [...prev, image.id]
-                            )
-                          }
+        <Tabs index={tabIndex} onChange={(index) => setActiveType(index === 0 ? 'images' : 'videos')}>
+          <TabList>
+            <Tab>Images</Tab>
+            <Tab>Videos</Tab>
+          </TabList>
+          <TabPanels>
+            <TabPanel px={0}>
+              <HStack spacing={3} flexWrap="wrap">
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedImageIds(images.map((item) => item.id))}
+                  isDisabled={images.length === 0 || busy || deleting}
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedImageIds([])}
+                  isDisabled={selectedImageIds.length === 0 || busy || deleting}
+                >
+                  Clear
+                </Button>
+                <Button
+                  variant="outline"
+                  colorScheme="red"
+                  onClick={() => deleteImages(selectedImageIds)}
+                  isDisabled={selectedImageIds.length === 0 || busy || deleting}
+                >
+                  Delete selected ({selectedImageIds.length})
+                </Button>
+              </HStack>
+
+              <Divider my={4} />
+
+              {busy || deleting ? (
+                <Text color="gray.500">Loading...</Text>
+              ) : images.length === 0 ? (
+                <Text color="gray.500">No images generated yet.</Text>
+              ) : (
+                <>
+                  <SimpleGrid columns={{ base: 1, sm: 2, lg: 3 }} spacing={4}>
+                    {images.map((item) => (
+                      <Box
+                        key={item.id}
+                        bg="#0f141f"
+                        border="1px solid"
+                        borderColor="#1e2636"
+                        borderRadius="16px"
+                        overflow="hidden"
+                      >
+                        <Image
+                          src={`data:image/jpeg;base64,${item.data}`}
+                          alt={item.filename || `Generated #${item.id}`}
+                          w="100%"
+                          h="200px"
+                          objectFit="cover"
+                          cursor="pointer"
+                          onClick={() => openPreview(item.id)}
                         />
-                        <span className="muted">#{image.id}</span>
-                      </label>
-                      <button
-                        className="btn"
-                        onClick={() => deleteImages([image.id])}
-                        disabled={busy || deleting}
-                        style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2', padding: '6px 10px' }}
+                        <Stack spacing={2} p={3}>
+                          <HStack justify="space-between">
+                            <Text fontSize="sm" noOfLines={1}>
+                              #{item.id} {item.filename}
+                            </Text>
+                            <Checkbox
+                              isChecked={selectedImageIds.includes(item.id)}
+                              onChange={() =>
+                                setSelectedImageIds((prev) =>
+                                  prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id]
+                                )
+                              }
+                            />
+                          </HStack>
+                          <Text fontSize="sm" color="gray.500">
+                            Model: {modelLabel(item.face_model_id)}
+                          </Text>
+                          <Text fontSize="sm" color="gray.500">
+                            Restore: {item.restore ? 'Yes' : 'No'}
+                          </Text>
+                          <HStack spacing={2}>
+                            <Button size="sm" variant="outline" onClick={() => openPreview(item.id)}>
+                              Preview
+                            </Button>
+                            <Button size="sm" variant="outline" colorScheme="red" onClick={() => deleteImages([item.id])}>
+                              Delete
+                            </Button>
+                          </HStack>
+                        </Stack>
+                      </Box>
+                    ))}
+                  </SimpleGrid>
+
+                  <HStack justify="space-between" align="center" mt={4} flexWrap="wrap">
+                    <Text color="gray.500" fontSize="sm">
+                      Page {imagePage} / {Math.max(1, Math.ceil(imageTotal / imagePageSize))} ({imageTotal} total)
+                    </Text>
+                    <HStack spacing={2} flexWrap="wrap">
+                      <Select
+                        value={imagePageSize}
+                        onChange={(event) => {
+                          setImagePageSize(Number(event.target.value));
+                          setImagePage(1);
+                        }}
+                        isDisabled={busy || deleting}
+                        maxW="120px"
                       >
-                        Delete
-                      </button>
-                    </div>
-                    <img
-                      src={`data:image/jpeg;base64,${image.data}`}
-                      className="thumb"
-                      alt="Generated content"
-                      onClick={() => setPreviewId(image.id)}
-                      style={{ cursor: 'pointer' }}
+                        {PAGE_SIZE_OPTIONS.map((size) => (
+                          <option key={size} value={size}>
+                            {size} / page
+                          </option>
+                        ))}
+                      </Select>
+                      <Button
+                        variant="outline"
+                        onClick={() => setImagePage((prev) => Math.max(1, prev - 1))}
+                        isDisabled={busy || deleting || imagePage <= 1}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setImagePage((prev) => prev + 1)}
+                        isDisabled={busy || deleting || imagePage >= Math.max(1, Math.ceil(imageTotal / imagePageSize))}
+                      >
+                        Next
+                      </Button>
+                    </HStack>
+                  </HStack>
+                </>
+              )}
+            </TabPanel>
+            <TabPanel px={0}>
+              <HStack spacing={3} flexWrap="wrap">
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedVideoIds(videos.map((item) => item.id))}
+                  isDisabled={videos.length === 0 || busy || deleting}
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedVideoIds([])}
+                  isDisabled={selectedVideoIds.length === 0 || busy || deleting}
+                >
+                  Clear
+                </Button>
+                <Button
+                  variant="outline"
+                  colorScheme="red"
+                  onClick={() => deleteVideos(selectedVideoIds)}
+                  isDisabled={selectedVideoIds.length === 0 || busy || deleting}
+                >
+                  Delete selected ({selectedVideoIds.length})
+                </Button>
+              </HStack>
+
+              <Divider my={4} />
+
+              {busy || deleting ? (
+                <Text color="gray.500">Loading...</Text>
+              ) : videos.length === 0 ? (
+                <Text color="gray.500">No videos generated yet.</Text>
+              ) : (
+                <>
+                  <SimpleGrid columns={{ base: 1, sm: 2, lg: 3 }} spacing={4}>
+                    {videos.map((video) => (
+                      <Box
+                        key={video.id}
+                        bg="#0f141f"
+                        border="1px solid"
+                        borderColor="#1e2636"
+                        borderRadius="16px"
+                        overflow="hidden"
+                      >
+                        <Stack spacing={2} p={3}>
+                          <HStack justify="space-between">
+                            <Text fontSize="sm" noOfLines={1}>
+                              #{video.id} {video.filename}
+                            </Text>
+                            <Checkbox
+                              isChecked={selectedVideoIds.includes(video.id)}
+                              onChange={() =>
+                                setSelectedVideoIds((prev) =>
+                                  prev.includes(video.id) ? prev.filter((id) => id !== video.id) : [...prev, video.id]
+                                )
+                              }
+                            />
+                          </HStack>
+                          {videoSources[video.id] ? (
+                            <Box as="video" src={videoSources[video.id]} controls w="100%" h="200px" />
+                          ) : video.processing ? (
+                            <Text color="gray.500" fontSize="sm">
+                              Processing{Number.isFinite(video.progress_percent) ? ` (${video.progress_percent}%)` : ''}.
+                            </Text>
+                          ) : !video.has_content ? (
+                            <Text color="gray.500" fontSize="sm">
+                              No playable video data yet.
+                            </Text>
+                          ) : (
+                            <Text color="gray.500" fontSize="sm">
+                              Ready to load.
+                            </Text>
+                          )}
+                          <Text fontSize="sm" color="gray.500">
+                            Model: {modelLabel(video.face_model_id)}
+                          </Text>
+                          <Text fontSize="sm" color="gray.500">
+                            Processing: {video.processing ? 'Yes' : 'No'}
+                          </Text>
+                          <HStack spacing={2}>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => refreshVideoStatus(video)}
+                              isDisabled={statusLoadingIds.includes(video.id) || busy || deleting}
+                            >
+                              {statusLoadingIds.includes(video.id) ? 'Refreshing...' : 'Refresh Status'}
+                            </Button>
+                            {!video.processing && video.has_content && !videoSources[video.id] && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => loadVideoSource(video)}
+                                isDisabled={loadingVideoIds.includes(video.id)}
+                              >
+                                {loadingVideoIds.includes(video.id) ? 'Loading...' : 'Load Video'}
+                              </Button>
+                            )}
+                          </HStack>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            colorScheme="red"
+                            onClick={() => deleteVideos([video.id])}
+                            isDisabled={busy || deleting}
+                          >
+                            Delete
+                          </Button>
+                        </Stack>
+                      </Box>
+                    ))}
+                  </SimpleGrid>
+
+                  <HStack justify="space-between" align="center" mt={4} flexWrap="wrap">
+                    <Text color="gray.500" fontSize="sm">
+                      Page {videoPage} / {Math.max(1, Math.ceil(videoTotal / videoPageSize))} ({videoTotal} total)
+                    </Text>
+                    <HStack spacing={2} flexWrap="wrap">
+                      <Select
+                        value={videoPageSize}
+                        onChange={(event) => {
+                          setVideoPageSize(Number(event.target.value));
+                          setVideoPage(1);
+                        }}
+                        isDisabled={busy || deleting}
+                        maxW="120px"
+                      >
+                        {PAGE_SIZE_OPTIONS.map((size) => (
+                          <option key={size} value={size}>
+                            {size} / page
+                          </option>
+                        ))}
+                      </Select>
+                      <Button
+                        variant="outline"
+                        onClick={() => setVideoPage((prev) => Math.max(1, prev - 1))}
+                        isDisabled={busy || deleting || videoPage <= 1}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setVideoPage((prev) => prev + 1)}
+                        isDisabled={busy || deleting || videoPage >= Math.max(1, Math.ceil(videoTotal / videoPageSize))}
+                      >
+                        Next
+                      </Button>
+                    </HStack>
+                  </HStack>
+                </>
+              )}
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
+      </Stack>
+
+      <Modal
+        isOpen={Boolean(activePreview)}
+        onClose={() => {
+          setPreviewId(null);
+          setForcedPreview(null);
+          setZoomLevel(1);
+        }}
+        size="6xl"
+      >
+        <ModalOverlay />
+        <ModalContent bg="#0b0f1a">
+          <ModalCloseButton />
+          <ModalBody py={6}>
+            {activePreview && (
+              <Stack spacing={4} align="center">
+                <Box
+                  as="img"
+                  src={`data:image/jpeg;base64,${activePreview.data}`}
+                  alt="Preview"
+                  maxH="70vh"
+                  style={{ transform: `scale(${zoomLevel})`, transition: 'transform 120ms ease-out' }}
+                />
+                {!isForcedPreview && (
+                  <Text color="gray.500">
+                    {previewIndex + 1} / {images.length}
+                  </Text>
+                )}
+                <HStack spacing={2}>
+                  {!isForcedPreview && (
+                    <IconButton
+                      variant="outline"
+                      aria-label="Previous image"
+                      icon={<ArrowLeftIcon />}
+                      onClick={showPrevious}
                     />
-                    <div className="muted" style={{ marginTop: 8 }}>{modelLabel(image.face_model_id)}</div>
-                  </div>
-                ))}
-              </div>
-              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                <div className="muted">
-                  Page {imagePage} / {Math.max(1, Math.ceil(imageTotal / imagePageSize))} ({imageTotal} total)
-                </div>
-                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                  <label className="muted" htmlFor="image-page-size">Per page</label>
-                  <select
-                    id="image-page-size"
-                    value={imagePageSize}
-                    onChange={(event) => {
-                      setImagePageSize(Number(event.target.value));
-                      setImagePage(1);
-                    }}
-                    disabled={busy || deleting}
-                    style={{ width: 90 }}
-                  >
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>{size}</option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn"
-                    onClick={() => setImagePage((prev) => Math.max(1, prev - 1))}
-                    disabled={busy || deleting || imagePage <= 1}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={() => setImagePage((prev) => prev + 1)}
-                    disabled={
-                      busy ||
-                      deleting ||
-                      imagePage >= Math.max(1, Math.ceil(imageTotal / imagePageSize))
-                    }
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {activeType === 'videos' && (
-        <>
-          <div className="row" style={{ gap: 8 }}>
-            <button
-              className="btn"
-              onClick={() => setSelectedVideoIds(videos.map((item) => item.id))}
-              disabled={videos.length === 0 || busy || deleting}
-            >
-              Select all
-            </button>
-            <button
-              className="btn"
-              onClick={() => setSelectedVideoIds([])}
-              disabled={selectedVideoIds.length === 0 || busy || deleting}
-            >
-              Clear
-            </button>
-            <button
-              className="btn"
-              onClick={() => deleteVideos(selectedVideoIds)}
-              disabled={selectedVideoIds.length === 0 || busy || deleting}
-              style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2' }}
-            >
-              Delete selected ({selectedVideoIds.length})
-            </button>
-          </div>
-          {busy || deleting ? (
-            <p>Loading...</p>
-          ) : videos.length === 0 ? (
-            <div className="muted">No videos generated yet.</div>
-          ) : (
-            <>
-              <div className="preview-grid">
-                {videos.map((video) => (
-                  <div key={video.id} className="preview-card">
-                    <div className="preview-meta">
-                      <span className="preview-name">#{video.id} {video.filename}</span>
-                      <input
-                        type="checkbox"
-                        checked={selectedVideoIds.includes(video.id)}
-                        onChange={() =>
-                          setSelectedVideoIds((prev) =>
-                            prev.includes(video.id) ? prev.filter((id) => id !== video.id) : [...prev, video.id]
-                          )
-                        }
-                      />
-                    </div>
-                    {videoSources[video.id] ? (
-                      <video
-                        src={videoSources[video.id]}
-                        controls
-                        className="preview-img"
-                      />
-                    ) : video.processing ? (
-                      <div className="muted">
-                        Video is still processing{Number.isFinite(video.progress_percent)
-                          ? ` (${video.progress_percent}%)`
-                          : ''}.
-                      </div>
-                    ) : !video.has_content ? (
-                      <div className="muted">No playable video data yet.</div>
-                    ) : (
-                      <div className="muted">Ready to load.</div>
-                    )}
-                    <div className="muted">Model: {modelLabel(video.face_model_id)}</div>
-                    <div className="muted">Processing: {video.processing ? 'Yes' : 'No'}</div>
-                    <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                      <button
-                        className="btn"
-                        onClick={() => refreshVideoStatus(video)}
-                        disabled={statusLoadingIds.includes(video.id) || busy || deleting}
-                      >
-                        {statusLoadingIds.includes(video.id) ? 'Refreshing...' : 'Refresh Status'}
-                      </button>
-                      {!video.processing && video.has_content && !videoSources[video.id] && (
-                        <button
-                          className="btn"
-                          onClick={() => loadVideoSource(video)}
-                          disabled={loadingVideoIds.includes(video.id)}
-                        >
-                          {loadingVideoIds.includes(video.id) ? 'Loading...' : 'Load Video'}
-                        </button>
-                      )}
-                    </div>
-                    <button
-                      className="btn"
-                      onClick={() => deleteVideos([video.id])}
-                      disabled={busy || deleting}
-                      style={{ background: '#4a2525', borderColor: '#7a3a3a', color: '#ffc2c2', padding: '6px 10px' }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                <div className="muted">
-                  Page {videoPage} / {Math.max(1, Math.ceil(videoTotal / videoPageSize))} ({videoTotal} total)
-                </div>
-                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                  <label className="muted" htmlFor="video-page-size">Per page</label>
-                  <select
-                    id="video-page-size"
-                    value={videoPageSize}
-                    onChange={(event) => {
-                      setVideoPageSize(Number(event.target.value));
-                      setVideoPage(1);
-                    }}
-                    disabled={busy || deleting}
-                    style={{ width: 90 }}
-                  >
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>{size}</option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn"
-                    onClick={() => setVideoPage((prev) => Math.max(1, prev - 1))}
-                    disabled={busy || deleting || videoPage <= 1}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={() => setVideoPage((prev) => prev + 1)}
-                    disabled={
-                      busy ||
-                      deleting ||
-                      videoPage >= Math.max(1, Math.ceil(videoTotal / videoPageSize))
-                    }
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {activePreview && (
-        <div
-          className="modal"
-          onClick={() => {
-            setPreviewId(null);
-            setForcedPreview(null);
-            setZoomLevel(1);
-          }}
-        >
-          <button
-            className="modal-close"
-            onClick={(event) => {
-              event.stopPropagation();
-              setPreviewId(null);
-              setForcedPreview(null);
-              setZoomLevel(1);
-            }}
-          >
-            &times;
-          </button>
-          {!isForcedPreview && (
-            <button
-              className="btn"
-              onClick={(event) => {
-                event.stopPropagation();
-                showPrevious();
-              }}
-              style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)' }}
-            >
-              &larr;
-            </button>
-          )}
-          <img
-            src={`data:image/jpeg;base64,${activePreview.data}`}
-            alt="Preview"
-            className="modal-content"
-            onClick={(event) => event.stopPropagation()}
-            style={{
-              transform: `scale(${zoomLevel})`,
-              transition: 'transform 120ms ease-out',
-            }}
-          />
-          {!isForcedPreview && (
-            <button
-              className="btn"
-              onClick={(event) => {
-                event.stopPropagation();
-                showNext();
-              }}
-              style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)' }}
-            >
-              &rarr;
-            </button>
-          )}
-          {!isForcedPreview && (
-            <div
-              className="muted"
-              style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}
-            >
-              {previewIndex + 1} / {images.length}
-            </div>
-          )}
-          <div
-            className="row"
-            style={{ position: 'absolute', bottom: 16, right: 16, gap: 8, alignItems: 'center' }}
-          >
-            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomOut(); }}>
-              -
-            </button>
-            <div className="muted" style={{ minWidth: 60, textAlign: 'center' }}>
-              {Math.round(zoomLevel * 100)}%
-            </div>
-            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomIn(); }}>
-              +
-            </button>
-            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomReset(); }}>
-              Reset
-            </button>
-          </div>
-          <button
-            className="btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              deleteImages([activePreview.id]);
-            }}
-            disabled={busy || deleting}
-            style={{
-              position: 'absolute',
-              top: 20,
-              left: 20,
-              background: '#4a2525',
-              borderColor: '#7a3a3a',
-              color: '#ffc2c2',
-            }}
-          >
-            Delete image
-          </button>
-          <button
-            className="btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              deleteSourceImage(activePreview.input_image_id);
-            }}
-            disabled={busy || deleting || !activePreview.input_image_id}
-            style={{
-              position: 'absolute',
-              top: 20,
-              right: 20,
-              background: '#4a2525',
-              borderColor: '#7a3a3a',
-              color: '#ffc2c2',
-            }}
-          >
-            Delete source image
-          </button>
-        </div>
-      )}
-    </div>
+                  )}
+                  {!isForcedPreview && (
+                    <IconButton
+                      variant="outline"
+                      aria-label="Next image"
+                      icon={<ArrowRightIcon />}
+                      onClick={showNext}
+                    />
+                  )}
+                </HStack>
+                <HStack spacing={2}>
+                  <IconButton
+                    variant="outline"
+                    aria-label="Zoom out"
+                    icon={<MinusIcon />}
+                    onClick={handleZoomOut}
+                  />
+                  <Text color="gray.500" fontSize="sm" minW="80px" textAlign="center">
+                    {Math.round(zoomLevel * 100)}%
+                  </Text>
+                  <IconButton
+                    variant="outline"
+                    aria-label="Zoom in"
+                    icon={<AddIcon />}
+                    onClick={handleZoomIn}
+                  />
+                  <IconButton
+                    variant="outline"
+                    aria-label="Reset zoom"
+                    icon={<RepeatIcon />}
+                    onClick={handleZoomReset}
+                  />
+                </HStack>
+                <HStack spacing={3}>
+                  <IconButton
+                    variant="outline"
+                    colorScheme="red"
+                    aria-label="Delete image"
+                    icon={<DeleteIcon />}
+                    onClick={() => deleteImages([activePreview.id])}
+                    isDisabled={busy || deleting}
+                  />
+                  <IconButton
+                    variant="outline"
+                    colorScheme="red"
+                    aria-label="Delete source image"
+                    icon={<DeleteIcon />}
+                    onClick={() => deleteSourceImage(activePreview.input_image_id)}
+                    isDisabled={busy || deleting || !activePreview.input_image_id}
+                  />
+                </HStack>
+              </Stack>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+    </Box>
   );
 }

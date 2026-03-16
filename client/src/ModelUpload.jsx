@@ -1,7 +1,29 @@
 import React, { useEffect, useRef, useState } from 'react';
-import './styles.css';
-import { apiBaseUrl } from './utils';
 import JSZip from 'jszip';
+import {
+  Badge,
+  Box,
+  Button,
+  Checkbox,
+  Divider,
+  FormControl,
+  FormLabel,
+  Heading,
+  HStack,
+  Input,
+  NumberInput,
+  NumberInputField,
+  SimpleGrid,
+  Stack,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
+  Text,
+} from '@chakra-ui/react';
+import { apiBaseUrl } from './utils';
+import { useApp } from './contexts/AppContext.jsx';
 
 function buildId(file) {
   return `${file.name}-${file.size}-${file.lastModified}`;
@@ -15,7 +37,8 @@ function parseVersion(value) {
   return version;
 }
 
-export default function ModelUpload({ token }) {
+export default function ModelUpload() {
+  const { token } = useApp();
   const [mode, setMode] = useState('images');
   const [personName, setPersonName] = useState('');
   const [versionInput, setVersionInput] = useState('');
@@ -348,174 +371,211 @@ export default function ModelUpload({ token }) {
     }
   };
 
+  const tabIndex = mode === 'images' ? 0 : 1;
+
   return (
-    <div className="card">
-      <h2>Model Upload</h2>
-      <div className="tabs">
-        <button
-          type="button"
-          className={mode === 'images' ? 'tab active' : 'tab'}
-          onClick={() => handleModeChange('images')}
-        >
-          Images (Generate)
-        </button>
-        <button
-          type="button"
-          className={mode === 'safetensors' ? 'tab active' : 'tab'}
-          onClick={() => handleModeChange('safetensors')}
-        >
-          Safetensors (Upload)
-        </button>
-      </div>
+    <Box
+      bg="rgba(17, 22, 34, 0.9)"
+      border="1px solid"
+      borderColor="#1d2434"
+      borderRadius="20px"
+      p={{ base: 4, md: 6 }}
+      boxShadow="0 10px 30px rgba(0,0,0,0.35)"
+    >
+      <Stack spacing={5}>
+        <Box>
+          <Heading size="md">Model Upload</Heading>
+          <Text color="gray.500" mt={1}>
+            Train from images or upload safetensors. Manage versions and active models below.
+          </Text>
+        </Box>
 
-      <input
-        type="text"
-        placeholder="Person Name"
-        value={personName}
-        onChange={(e) => setPersonName(e.target.value)}
-      />
-      <input
-        type="number"
-        min="1"
-        placeholder="Version (optional, auto-increments if empty)"
-        value={versionInput}
-        onChange={(e) => setVersionInput(e.target.value)}
-      />
-      {!canSubmitVersion && (
-        <div className="error" style={{ textAlign: 'left' }}>
-          Version must be empty or a positive integer.
-        </div>
-      )}
-      <label className="row" style={{ gap: 8 }}>
-        <input
-          type="checkbox"
-          checked={setActive}
-          onChange={(e) => setSetActive(e.target.checked)}
-        />
-        <span>Set this version as active for inference</span>
-      </label>
+        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+          <FormControl>
+            <FormLabel>Person Name</FormLabel>
+            <Input
+              placeholder="Person Name"
+              value={personName}
+              onChange={(e) => setPersonName(e.target.value)}
+            />
+          </FormControl>
+          <FormControl>
+            <FormLabel>Version</FormLabel>
+            <NumberInput min={1} value={versionInput} onChange={(value) => setVersionInput(value)}>
+              <NumberInputField placeholder="Optional (auto-increments)" />
+            </NumberInput>
+          </FormControl>
+        </SimpleGrid>
 
-      {mode === 'images' && (
-        <>
-          <input
-            type="file"
-            accept="image/*,.zip"
-            multiple
-            disabled={busy || parsing}
-            onChange={handleFileSelect}
-          />
-
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <div className="muted">
-              {parsing ? 'Processing zip...' : `${totalFiles} image${totalFiles === 1 ? '' : 's'} selected`}
-            </div>
-            <button onClick={handleGenerateModel} disabled={!canSubmitImages}>
-              {busy ? 'Generating...' : 'Generate Model'}
-            </button>
-          </div>
-
-          {items.length > 0 && (
-            <div className="preview-grid">
-              {items.map((item) => (
-                <div className="preview-card" key={item.id}>
-                  <img src={item.url} alt={item.file.name} className="preview-img" />
-                  <div className="preview-meta">
-                    <div className="preview-name">{item.file.name}</div>
-                    <button
-                      type="button"
-                      className="preview-remove"
-                      onClick={() => handleRemove(item.id)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {mode === 'safetensors' && (
-        <>
-          <input
-            type="file"
-            accept=".safetensor,.safetensors"
-            disabled={busy}
-            onChange={handleSafetensorSelect}
-          />
-          {safetensorFile ? (
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <div className="muted">
-                {safetensorFile.name} · {formatBytes(safetensorFile.size)}
-              </div>
-              <button type="button" className="preview-remove" onClick={handleSafetensorRemove}>
-                Remove
-              </button>
-            </div>
-          ) : (
-            <div className="muted">No safetensors file selected.</div>
-          )}
-          <button onClick={handleUploadSafetensor} disabled={!canSubmitSafetensor}>
-            {busy ? 'Uploading...' : 'Upload Model'}
-          </button>
-        </>
-      )}
-
-      <div style={{ borderTop: '1px solid #2a3347', paddingTop: 12 }}>
-        <h3 style={{ margin: 0 }}>People & Versions</h3>
-        {groupedModels.size === 0 ? (
-          <div className="muted">No models uploaded yet.</div>
-        ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {Array.from(groupedModels.entries()).map(([groupName, entries]) => {
-              const sorted = [...entries].sort((a, b) => (b.version || 1) - (a.version || 1));
-              return (
-                <div key={groupName} className="preview-card" style={{ gap: 8 }}>
-                  <div className="row" style={{ justifyContent: 'space-between' }}>
-                    <strong>{groupName}</strong>
-                    <div className="row" style={{ gap: 8 }}>
-                      <span className="muted">{sorted.length} version{sorted.length === 1 ? '' : 's'}</span>
-                      <button
-                        type="button"
-                        className="preview-remove"
-                        disabled={busy}
-                        onClick={() => handleDeletePersonVersions(groupName)}
-                      >
-                        Delete All
-                      </button>
-                    </div>
-                  </div>
-                  {sorted.map((model) => (
-                    <div key={model.id} className="row" style={{ justifyContent: 'space-between' }}>
-                      <span>
-                        v{model.version || 1} {model.is_active ? '(Active)' : ''}
-                      </span>
-                      <div className="row" style={{ gap: 8 }}>
-                        <button
-                          type="button"
-                          disabled={busy || model.is_active}
-                          onClick={() => handleActivateModel(model.id)}
-                        >
-                          {model.is_active ? 'Selected' : 'Set for Inference'}
-                        </button>
-                        <button
-                          type="button"
-                          className="preview-remove"
-                          disabled={busy}
-                          onClick={() => handleDeleteModel(model.id, groupName, model.version || 1)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
+        {!canSubmitVersion && (
+          <Text color="red.300" fontSize="sm">
+            Version must be empty or a positive integer.
+          </Text>
         )}
-      </div>
-    </div>
+
+        <Checkbox isChecked={setActive} onChange={(e) => setSetActive(e.target.checked)}>
+          Set this version as active for inference
+        </Checkbox>
+
+        <Tabs
+          index={tabIndex}
+          onChange={(index) => handleModeChange(index === 0 ? 'images' : 'safetensors')}
+          variant="enclosed"
+          colorScheme="brand"
+        >
+          <TabList>
+            <Tab>Images (Generate)</Tab>
+            <Tab>Safetensors (Upload)</Tab>
+          </TabList>
+          <TabPanels>
+            <TabPanel px={0}>
+              <Stack spacing={4}>
+                <Input
+                  type="file"
+                  accept="image/*,.zip"
+                  multiple
+                  disabled={busy || parsing}
+                  onChange={handleFileSelect}
+                />
+
+                <HStack justify="space-between" align="center" flexWrap="wrap">
+                  <Text color="gray.500">
+                    {parsing ? 'Processing zip...' : `${totalFiles} image${totalFiles === 1 ? '' : 's'} selected`}
+                  </Text>
+                  <Button onClick={handleGenerateModel} isDisabled={!canSubmitImages}>
+                    {busy ? 'Generating...' : 'Generate Model'}
+                  </Button>
+                </HStack>
+
+                {items.length > 0 && (
+                  <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing={4}>
+                    {items.map((item) => (
+                      <Box
+                        key={item.id}
+                        bg="#0f141f"
+                        border="1px solid"
+                        borderColor="#1e2636"
+                        borderRadius="16px"
+                        overflow="hidden"
+                      >
+                        <Box as="img" src={item.url} alt={item.file.name} w="100%" h="160px" objectFit="cover" />
+                        <Stack spacing={2} p={3}>
+                          <Text fontSize="sm" noOfLines={1}>
+                            {item.file.name}
+                          </Text>
+                          <Button size="sm" variant="outline" onClick={() => handleRemove(item.id)}>
+                            Remove
+                          </Button>
+                        </Stack>
+                      </Box>
+                    ))}
+                  </SimpleGrid>
+                )}
+              </Stack>
+            </TabPanel>
+
+            <TabPanel px={0}>
+              <Stack spacing={4}>
+                <Input
+                  type="file"
+                  accept=".safetensor,.safetensors"
+                  disabled={busy}
+                  onChange={handleSafetensorSelect}
+                />
+                {safetensorFile ? (
+                  <HStack justify="space-between" align="center" flexWrap="wrap">
+                    <Text color="gray.500">
+                      {safetensorFile.name} · {formatBytes(safetensorFile.size)}
+                    </Text>
+                    <Button size="sm" variant="outline" colorScheme="red" onClick={handleSafetensorRemove}>
+                      Remove
+                    </Button>
+                  </HStack>
+                ) : (
+                  <Text color="gray.500">No safetensors file selected.</Text>
+                )}
+                <Button onClick={handleUploadSafetensor} isDisabled={!canSubmitSafetensor}>
+                  {busy ? 'Uploading...' : 'Upload Model'}
+                </Button>
+              </Stack>
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
+
+        <Divider />
+
+        <Box>
+          <Heading size="sm" mb={3}>
+            People & Versions
+          </Heading>
+          {groupedModels.size === 0 ? (
+            <Text color="gray.500">No models uploaded yet.</Text>
+          ) : (
+            <Stack spacing={4}>
+              {Array.from(groupedModels.entries()).map(([groupName, entries]) => {
+                const sorted = [...entries].sort((a, b) => (b.version || 1) - (a.version || 1));
+                return (
+                  <Box
+                    key={groupName}
+                    bg="#0f141f"
+                    border="1px solid"
+                    borderColor="#1e2636"
+                    borderRadius="16px"
+                    p={4}
+                  >
+                    <HStack justify="space-between" align="center" flexWrap="wrap">
+                      <Heading size="sm">{groupName}</Heading>
+                      <HStack spacing={3}>
+                        <Text fontSize="sm" color="gray.500">
+                          {sorted.length} version{sorted.length === 1 ? '' : 's'}
+                        </Text>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          colorScheme="red"
+                          disabled={busy}
+                          onClick={() => handleDeletePersonVersions(groupName)}
+                        >
+                          Delete All
+                        </Button>
+                      </HStack>
+                    </HStack>
+                    <Stack spacing={2} mt={3}>
+                      {sorted.map((model) => (
+                        <HStack key={model.id} justify="space-between" align="center" flexWrap="wrap">
+                          <HStack>
+                            <Text>v{model.version || 1}</Text>
+                            {model.is_active && <Badge colorScheme="green">Active</Badge>}
+                          </HStack>
+                          <HStack spacing={2}>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              isDisabled={busy || model.is_active}
+                              onClick={() => handleActivateModel(model.id)}
+                            >
+                              {model.is_active ? 'Selected' : 'Set for Inference'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              colorScheme="red"
+                              isDisabled={busy}
+                              onClick={() => handleDeleteModel(model.id, groupName, model.version || 1)}
+                            >
+                              Delete
+                            </Button>
+                          </HStack>
+                        </HStack>
+                      ))}
+                    </Stack>
+                  </Box>
+                );
+              })}
+            </Stack>
+          )}
+        </Box>
+      </Stack>
+    </Box>
   );
 }

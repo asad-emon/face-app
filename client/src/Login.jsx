@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
+import { Alert, AlertIcon, Box, Button, Heading, Input, Stack, Text } from '@chakra-ui/react';
 import { apiBaseUrl } from './utils';
+import { useApp } from './contexts/AppContext.jsx';
 
-export default function Login({ setToken }) {
+export default function Login() {
+  const { setToken } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
@@ -50,29 +53,49 @@ export default function Login({ setToken }) {
   };
 
   return (
-    <div className="container login-container">
-      <h2>{isRegistering ? 'Register' : 'Login'}</h2>
-      <form onSubmit={isRegistering ? handleRegister : handleLogin}>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Email"
-          required
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-          required
-        />
-        <button type="submit">{isRegistering ? 'Register' : 'Login'}</button>
-        {error && <p className="error">{error}</p>}
-      </form>
-      <button onClick={() => setIsRegistering(!isRegistering)} className="toggle-auth">
-        {isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}
-      </button>
-    </div>
+    <Box maxW="420px" mx="auto" mt={12}>
+      <Box p={6}>
+        <Stack spacing={4}>
+          <Heading size="md" textAlign="center">
+            {isRegistering ? 'Register' : 'Login'}
+          </Heading>
+          <Box as="form" onSubmit={isRegistering ? handleRegister : handleLogin}>
+            <Stack spacing={3}>
+              <Input
+                placeholder="Email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+              <Input
+                placeholder="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete={isRegistering ? 'new-password' : 'current-password'}
+              />
+              <Button type="submit">
+                {isRegistering ? 'Register' : 'Login'}
+              </Button>
+              {error && (
+                <Alert status="error" borderRadius="8px">
+                  <AlertIcon />
+                  {error}
+                </Alert>
+              )}
+            </Stack>
+          </Box>
+          <Button variant="ghost" onClick={() => setIsRegistering(!isRegistering)}>
+            {isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}
+          </Button>
+          <Text fontSize="sm" color="gray.500" textAlign="center">
+            Secure access to your workspace.
+          </Text>
+        </Stack>
+      </Box>
+    </Box>
   );
 }

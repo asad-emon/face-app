@@ -1,6 +1,32 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import './styles.css';
+import {
+  Box,
+  Button,
+  Divider,
+  Heading,
+  HStack,
+  IconButton,
+  Image,
+  Input,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalOverlay,
+  Select,
+  SimpleGrid,
+  Stack,
+  Text,
+} from '@chakra-ui/react';
+import {
+  AddIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  MinusIcon,
+  RepeatIcon,
+} from '@chakra-ui/icons';
 import { apiBaseUrl } from './utils';
+import { useApp } from './contexts/AppContext.jsx';
 
 const CIVITAI_IMAGES_ENDPOINT = 'https://civitai.com/api/v1/images';
 const PAGE_SIZE_OPTIONS = [8, 12, 24, 48, 96, 120];
@@ -13,7 +39,8 @@ function toNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export default function CivitaiGallery({ isActive = false, appToken, onUseInputImage }) {
+export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
+  const { token: appToken } = useApp();
   const [token, setToken] = useState(localStorage.getItem('civitai_token') || '');
   const [tokenInput, setTokenInput] = useState(token);
   const [items, setItems] = useState([]);
@@ -313,359 +340,359 @@ export default function CivitaiGallery({ isActive = false, appToken, onUseInputI
   };
 
   return (
-    <div className="card">
-      <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Civitai Images</h2>
-        <div className="row" style={{ gap: 8 }}>
-          <button className="btn" onClick={fetchImages} disabled={busy}>Refresh</button>
-        </div>
-      </div>
+    <Box
+      bg="rgba(17, 22, 34, 0.9)"
+      border="1px solid"
+      borderColor="#1d2434"
+      borderRadius="20px"
+      p={{ base: 4, md: 6 }}
+      boxShadow="0 10px 30px rgba(0,0,0,0.35)"
+    >
+      <Stack spacing={5}>
+        <HStack justify="space-between" align="center" flexWrap="wrap">
+          <Box>
+            <Heading size="md">Civitai Images</Heading>
+            <Text color="gray.500">Browse and pull references for inference.</Text>
+          </Box>
+          <Button onClick={fetchImages} isDisabled={busy} variant="outline">
+            Refresh
+          </Button>
+        </HStack>
 
-      <div className="card" style={{ background: '#0f141f', borderColor: '#1e2636' }}>
-        <div className="row" style={{ gap: 12 }}>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <label className="muted">Civitai API token</label>
-            <input
-              type="password"
-              placeholder="Paste your Civitai API key"
-              value={tokenInput}
-              onChange={(event) => setTokenInput(event.target.value)}
+        <Box bg="#0f141f" border="1px solid" borderColor="#1e2636" borderRadius="16px" p={4}>
+          <Stack spacing={3}>
+            <HStack spacing={3} align="flex-end" flexWrap="wrap">
+              <Box flex="1" minW="220px">
+                <Text fontSize="sm" color="gray.500" mb={1}>
+                  Civitai API token
+                </Text>
+                <Input
+                  type="password"
+                  placeholder="Paste your Civitai API key"
+                  value={tokenInput}
+                  onChange={(event) => setTokenInput(event.target.value)}
+                />
+              </Box>
+              <HStack spacing={2}>
+                <Button
+                  onClick={() => {
+                    localStorage.setItem('civitai_token', tokenInput.trim());
+                    setToken(tokenInput.trim());
+                  }}
+                >
+                  Save Token
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    localStorage.removeItem('civitai_token');
+                    setToken('');
+                    setTokenInput('');
+                  }}
+                  isDisabled={!token && !tokenInput}
+                >
+                  Clear
+                </Button>
+              </HStack>
+            </HStack>
+            <Text fontSize="sm" color="gray.500">
+              Token is optional for public images, but required for content that needs login.
+            </Text>
+          </Stack>
+        </Box>
+
+        <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              Username
+            </Text>
+            <Input
+              placeholder="Filter by username"
+              value={username}
+              onChange={(event) => {
+                setPage(1);
+                setUsername(event.target.value);
+              }}
             />
-          </div>
-          <div className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
-            <button
-              className="btn"
-              onClick={() => {
-                localStorage.setItem('civitai_token', tokenInput.trim());
-                setToken(tokenInput.trim());
+          </Box>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              Model ID
+            </Text>
+            <Input
+              placeholder="Filter by modelId"
+              value={modelId}
+              onChange={(event) => {
+                setPage(1);
+                setModelId(event.target.value);
+              }}
+            />
+          </Box>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              Model Version ID
+            </Text>
+            <Input
+              placeholder="Filter by modelVersionId"
+              value={modelVersionId}
+              onChange={(event) => {
+                setPage(1);
+                setModelVersionId(event.target.value);
+              }}
+            />
+          </Box>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              Model for inference
+            </Text>
+            {models.length === 0 ? (
+              <Text color="gray.500">{modelsBusy ? 'Loading models...' : 'No models available'}</Text>
+            ) : (
+              <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
+                {models.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {modelLabel(model)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Box>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              NSFW
+            </Text>
+            <Select
+              value={nsfw}
+              onChange={(event) => {
+                setPage(1);
+                setNsfw(event.target.value);
               }}
             >
-              Save Token
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                localStorage.removeItem('civitai_token');
-                setToken('');
-                setTokenInput('');
-              }}
-              disabled={!token && !tokenInput}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-        <div className="muted">
-          Token is optional for public images, but required for content that needs login.
-        </div>
-      </div>
-
-      <div className="row">
-        <div style={{ minWidth: 160 }}>
-          <label className="muted">Username</label>
-          <input
-            type="text"
-            placeholder="Filter by username"
-            value={username}
-            onChange={(event) => {
-              setPage(1);
-              setUsername(event.target.value);
-            }}
-          />
-        </div>
-        <div style={{ minWidth: 160 }}>
-          <label className="muted">Model ID</label>
-          <input
-            type="text"
-            placeholder="Filter by modelId"
-            value={modelId}
-            onChange={(event) => {
-              setPage(1);
-              setModelId(event.target.value);
-            }}
-          />
-        </div>
-        <div style={{ minWidth: 180 }}>
-          <label className="muted">Model Version ID</label>
-          <input
-            type="text"
-            placeholder="Filter by modelVersionId"
-            value={modelVersionId}
-            onChange={(event) => {
-              setPage(1);
-              setModelVersionId(event.target.value);
-            }}
-          />
-        </div>
-        <div style={{ minWidth: 220 }}>
-          <label className="muted">Model for inference</label>
-          {models.length === 0 ? (
-            <div className="muted">{modelsBusy ? 'Loading models...' : 'No models available'}</div>
-          ) : (
-            <select
-              value={selectedModelId}
-              onChange={(event) => setSelectedModelId(event.target.value)}
-              style={{ width: 220 }}
-            >
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {modelLabel(model)}
+              {NSFW_OPTIONS.map((option) => (
+                <option key={option || 'all'} value={option}>
+                  {option || 'All'}
                 </option>
               ))}
-            </select>
-          )}
-        </div>
-        <div>
-          <label className="muted">NSFW</label>
-          <select
-            value={nsfw}
-            onChange={(event) => {
-              setPage(1);
-              setNsfw(event.target.value);
-            }}
-            style={{ width: 140 }}
-          >
-            {NSFW_OPTIONS.map((option) => (
-              <option key={option || 'all'} value={option}>
-                {option || 'All'}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="muted">Sort</label>
-          <select
-            value={sort}
-            onChange={(event) => {
-              setPage(1);
-              setSort(event.target.value);
-            }}
-            style={{ width: 180 }}
-          >
-            {SORT_OPTIONS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="muted">Period</label>
-          <select
-            value={period}
-            onChange={(event) => {
-              setPage(1);
-              setPeriod(event.target.value);
-            }}
-            style={{ width: 140 }}
-          >
-            {PERIOD_OPTIONS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="muted">Per page</label>
-          <select
-            value={limit}
-            onChange={(event) => {
-              setLimit(toNumber(event.target.value, 24));
-              setPage(1);
-            }}
-            style={{ width: 120 }}
-          >
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>{size}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {busy ? (
-        <div className="muted">Loading...</div>
-      ) : error ? (
-        <div className="muted">Error: {error}</div>
-      ) : items.length === 0 ? (
-        <div className="muted">No images found for the current filters.</div>
-      ) : (
-        <div className="grid">
-          {items.map((image) => (
-            <div key={image.id} className="preview-card">
-              <div className="preview-meta">
-                <span className="preview-name">#{image.id}</span>
-                <span className="muted">{image.username || 'Unknown'}</span>
-              </div>
-              <img
-                src={image.url}
-                alt={`Civitai ${image.id}`}
-                className="preview-img"
-                loading="lazy"
-                onClick={() => {
-                  setPreviewId(image.id);
-                  setZoomLevel(1);
-                }}
-                style={{ cursor: 'pointer' }}
-              />
-              <div className="muted">NSFW: {image.nsfwLevel || (image.nsfw ? 'Yes' : 'No')}</div>
-              {image.stats && (
-                <div className="muted">
-                  Hearts {toNumber(image.stats.heartCount, 0)} | Likes {toNumber(image.stats.likeCount, 0)} | Comments {toNumber(image.stats.commentCount, 0)}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="muted">
-          Page {page}
-          {totalPages ? ` / ${totalPages}` : ''}
-          {metadata?.totalItems ? ` (${metadata.totalItems} total)` : ''}
-        </div>
-        <div className="row" style={{ gap: 8 }}>
-          <button
-            className="btn"
-            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-            disabled={busy || page <= 1}
-          >
-            Previous
-          </button>
-          <button
-            className="btn"
-            onClick={() => setPage((prev) => prev + 1)}
-            disabled={busy || (totalPages ? page >= totalPages : false)}
-          >
-            Next
-          </button>
-        </div>
-      </div>
-
-      <div className="muted">
-        If you hit CORS errors in the browser, we can proxy the Civitai API through the backend.
-      </div>
-
-      {preview && (
-        <div
-          className="modal"
-          onClick={() => {
-            setPreviewId(null);
-            setZoomLevel(1);
-          }}
-        >
-          <button
-            className="modal-close"
-            onClick={(event) => {
-              event.stopPropagation();
-              setPreviewId(null);
-              setZoomLevel(1);
-            }}
-          >
-            &times;
-          </button>
-          <button
-            className="btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              showPrevious();
-            }}
-            style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)' }}
-          >
-            &larr;
-          </button>
-          <img
-            src={preview.url}
-            alt={`Civitai ${preview.id}`}
-            className="modal-content"
-            onClick={(event) => event.stopPropagation()}
-            style={{
-              transform: `scale(${zoomLevel})`,
-              transition: 'transform 120ms ease-out',
-            }}
-          />
-          <button
-            className="btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              showNext();
-            }}
-            style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)' }}
-          >
-            &rarr;
-          </button>
-          <div
-            className="muted"
-            style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}
-          >
-            {previewIndex + 1} / {items.length}
-          </div>
-          <div
-            className="row"
-            style={{ position: 'absolute', bottom: 16, right: 16, gap: 8, alignItems: 'center' }}
-          >
-            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomOut(); }}>
-              -
-            </button>
-            <div className="muted" style={{ minWidth: 60, textAlign: 'center' }}>
-              {Math.round(zoomLevel * 100)}%
-            </div>
-            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomIn(); }}>
-              +
-            </button>
-            <button className="btn" onClick={(event) => { event.stopPropagation(); handleZoomReset(); }}>
-              Reset
-            </button>
-          </div>
-          <button
-            className="btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              handleInference();
-            }}
-            disabled={inferenceBusy}
-            style={{
-              position: 'absolute',
-              top: 20,
-              left: 20,
-            }}
-          >
-            {inferenceBusy ? 'Starting...' : 'Use for Inference'}
-          </button>
-          {inferenceMessage && (
-            <div
-              className="muted"
-              style={{
-                position: 'absolute',
-                top: 68,
-                left: 20,
-                background: '#0b0d12',
-                border: '1px solid #2a3347',
-                padding: '8px 12px',
-                borderRadius: 8,
-                maxWidth: 320,
+            </Select>
+          </Box>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              Sort
+            </Text>
+            <Select
+              value={sort}
+              onChange={(event) => {
+                setPage(1);
+                setSort(event.target.value);
               }}
             >
-              {inferenceMessage}
-            </div>
-          )}
-          {swapJobId && (
-            <div
-              className="muted"
-              style={{
-                position: 'absolute',
-                top: inferenceMessage ? 132 : 68,
-                left: 20,
-                background: '#0b0d12',
-                border: '1px solid #2a3347',
-                padding: '8px 12px',
-                borderRadius: 8,
-                maxWidth: 320,
+              {SORT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </Select>
+          </Box>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              Period
+            </Text>
+            <Select
+              value={period}
+              onChange={(event) => {
+                setPage(1);
+                setPeriod(event.target.value);
               }}
             >
-              Swap status: {swapJobStatus || 'queued'}
-              {swapJobError ? ` (${swapJobError})` : ''}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+              {PERIOD_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </Select>
+          </Box>
+          <Box>
+            <Text fontSize="sm" color="gray.500" mb={1}>
+              Per page
+            </Text>
+            <Select
+              value={limit}
+              onChange={(event) => {
+                setLimit(toNumber(event.target.value, 24));
+                setPage(1);
+              }}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </Select>
+          </Box>
+        </SimpleGrid>
+
+        {busy ? (
+          <Text color="gray.500">Loading...</Text>
+        ) : error ? (
+          <Text color="red.300">Error: {error}</Text>
+        ) : items.length === 0 ? (
+          <Text color="gray.500">No images found for the current filters.</Text>
+        ) : (
+          <SimpleGrid columns={{ base: 1, sm: 2, lg: 3 }} spacing={4}>
+            {items.map((image) => (
+              <Box
+                key={image.id}
+                bg="#0f141f"
+                border="1px solid"
+                borderColor="#1e2636"
+                borderRadius="16px"
+                overflow="hidden"
+              >
+                <Stack spacing={2} p={3}>
+                  <HStack justify="space-between">
+                    <Text fontSize="sm">#{image.id}</Text>
+                    <Text fontSize="sm" color="gray.500">
+                      {image.username || 'Unknown'}
+                    </Text>
+                  </HStack>
+                </Stack>
+                <Image
+                  src={image.url}
+                  alt={`Civitai ${image.id}`}
+                  w="100%"
+                  h="220px"
+                  objectFit="cover"
+                  loading="lazy"
+                  cursor="pointer"
+                  onClick={() => {
+                    setPreviewId(image.id);
+                    setZoomLevel(1);
+                  }}
+                />
+                <Stack spacing={2} p={3}>
+                  <Text fontSize="sm" color="gray.500">
+                    NSFW: {image.nsfwLevel || (image.nsfw ? 'Yes' : 'No')}
+                  </Text>
+                  {image.stats && (
+                    <Text fontSize="sm" color="gray.500">
+                      Hearts {toNumber(image.stats.heartCount, 0)} | Likes {toNumber(image.stats.likeCount, 0)} |
+                      Comments {toNumber(image.stats.commentCount, 0)}
+                    </Text>
+                  )}
+                </Stack>
+              </Box>
+            ))}
+          </SimpleGrid>
+        )}
+
+        <HStack justify="space-between" align="center" flexWrap="wrap">
+          <Text color="gray.500">
+            Page {page}
+            {totalPages ? ` / ${totalPages}` : ''}
+            {metadata?.totalItems ? ` (${metadata.totalItems} total)` : ''}
+          </Text>
+          <HStack spacing={2}>
+            <Button variant="outline" onClick={() => setPage((prev) => Math.max(1, prev - 1))} isDisabled={busy || page <= 1}>
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setPage((prev) => prev + 1)}
+              isDisabled={busy || (totalPages ? page >= totalPages : false)}
+            >
+              Next
+            </Button>
+          </HStack>
+        </HStack>
+
+        <Text fontSize="sm" color="gray.500">
+          If you hit CORS errors in the browser, we can proxy the Civitai API through the backend.
+        </Text>
+      </Stack>
+
+      <Modal
+        isOpen={Boolean(preview)}
+        onClose={() => {
+          setPreviewId(null);
+          setZoomLevel(1);
+        }}
+        size="6xl"
+      >
+        <ModalOverlay />
+        <ModalContent bg="#0b0f1a">
+          <ModalCloseButton />
+          <ModalBody py={6}>
+            {preview && (
+              <Stack spacing={4} align="center">
+                <Image
+                  src={preview.url}
+                  alt={`Civitai ${preview.id}`}
+                  maxH="70vh"
+                  style={{ transform: `scale(${zoomLevel})`, transition: 'transform 120ms ease-out' }}
+                />
+                <Text color="gray.500">
+                  {previewIndex + 1} / {items.length}
+                </Text>
+                <HStack spacing={2}>
+                  <IconButton
+                    variant="outline"
+                    aria-label="Previous image"
+                    icon={<ArrowLeftIcon />}
+                    onClick={showPrevious}
+                  />
+                  <IconButton
+                    variant="outline"
+                    aria-label="Next image"
+                    icon={<ArrowRightIcon />}
+                    onClick={showNext}
+                  />
+                </HStack>
+                <HStack spacing={2}>
+                  <IconButton
+                    variant="outline"
+                    aria-label="Zoom out"
+                    icon={<MinusIcon />}
+                    onClick={handleZoomOut}
+                  />
+                  <Text color="gray.500" fontSize="sm" minW="80px" textAlign="center">
+                    {Math.round(zoomLevel * 100)}%
+                  </Text>
+                  <IconButton
+                    variant="outline"
+                    aria-label="Zoom in"
+                    icon={<AddIcon />}
+                    onClick={handleZoomIn}
+                  />
+                  <IconButton
+                    variant="outline"
+                    aria-label="Reset zoom"
+                    icon={<RepeatIcon />}
+                    onClick={handleZoomReset}
+                  />
+                </HStack>
+                <IconButton
+                  variant="outline"
+                  aria-label="Use for inference"
+                  icon={<AddIcon />}
+                  onClick={handleInference}
+                  isDisabled={inferenceBusy}
+                />
+                {inferenceMessage && (
+                  <Text color="gray.500" fontSize="sm">
+                    {inferenceMessage}
+                  </Text>
+                )}
+                {swapJobId && (
+                  <Text color="gray.500" fontSize="sm">
+                    Swap status: {swapJobStatus || 'queued'}
+                    {swapJobError ? ` (${swapJobError})` : ''}
+                  </Text>
+                )}
+              </Stack>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+    </Box>
   );
 }

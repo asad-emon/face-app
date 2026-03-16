@@ -1,60 +1,90 @@
-import React, { useState } from 'react';
+import React from 'react';
+import {
+  Box,
+  Button,
+  Container,
+  HStack,
+  Heading,
+  Stack,
+  Tab,
+  TabList,
+  Tabs,
+  Tag,
+  Text,
+} from '@chakra-ui/react';
 import ImageGallery from './ImageGallery';
 import ImageUpload from './ImageUpload';
 import ModelUpload from './ModelUpload';
 import Login from './Login';
 import CivitaiGallery from './CivitaiGallery';
-import './styles.css';
-
-function TabButton({ active, onClick, children }) {
-  return <button className={active ? 'tab active' : 'tab'} onClick={onClick}>{children}</button>;
-}
+import { useApp } from './contexts/AppContext.jsx';
 
 export default function App() {
-  const [tab, setTab] = useState('model');
-  const [token, setToken] = useState(localStorage.getItem('token'));
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    setToken(null);
-  };
+  const { tab, setTab, token, logout } = useApp();
+  const tabs = [
+    { id: 'model', label: 'Model Upload' },
+    { id: 'upload', label: 'Swap' },
+    { id: 'gallery', label: 'Gallery' },
+    { id: 'civitai', label: 'Civitai' },
+  ];
+  const activeIndex = Math.max(0, tabs.findIndex((item) => item.id === tab));
 
   if (!token) {
-    return <Login setToken={setToken} />;
+    return <Login />;
   }
 
   return (
-    <div className="container">
-      <div className="header">
-        <button onClick={handleLogout} className="logout-button">Logout</button>
-      </div>
-      <div className="tabs" style={{ marginTop: 16 }}>
-        <TabButton active={tab === 'model'} onClick={() => setTab('model')}>Model Upload</TabButton>
-        <TabButton active={tab === 'upload'} onClick={() => setTab('upload')}>Swap</TabButton>
-        <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')}>Gallery</TabButton>
-        <TabButton active={tab === 'civitai'} onClick={() => setTab('civitai')}>Civitai</TabButton>
-      </div>
+    <Container maxW="6xl" py={{ base: 6, md: 10 }}>
+      <Stack spacing={6} mb={8}>
+        <HStack justify="space-between" align="flex-start" flexWrap="wrap">
+          <Box>
+            <Tag colorScheme="brand" mb={3}>
+              Face App Studio
+            </Tag>
+            <Heading size="lg">Create, swap, and review media in one place</Heading>
+            <Text color="gray.400" mt={2} maxW="560px">
+              Run image and video swaps, manage models, and curate your gallery with a focused, production-ready
+              workflow.
+            </Text>
+          </Box>
+          <Button variant="outline" colorScheme="red" onClick={logout}>
+            Logout
+          </Button>
+        </HStack>
 
-      <div style={{ display: tab === 'model' ? 'block' : 'none' }}>
-        <ModelUpload token={token} />
-      </div>
-      <div style={{ display: tab === 'upload' ? 'block' : 'none' }}>
-        <ImageUpload token={token} />
-      </div>
-      <div style={{ display: tab === 'gallery' ? 'block' : 'none' }}>
-        <ImageGallery token={token} isActive={tab === 'gallery'} />
-      </div>
-      <div style={{ display: tab === 'civitai' ? 'block' : 'none' }}>
+        <Tabs
+          index={activeIndex}
+          onChange={(index) => setTab(tabs[index].id)}
+          variant="enclosed"
+          colorScheme="brand"
+        >
+          <TabList>
+            {tabs.map((item) => (
+              <Tab key={item.id}>{item.label}</Tab>
+            ))}
+          </TabList>
+        </Tabs>
+      </Stack>
+
+      <Box display={tab === 'model' ? 'block' : 'none'}>
+        <ModelUpload />
+      </Box>
+      <Box display={tab === 'upload' ? 'block' : 'none'}>
+        <ImageUpload />
+      </Box>
+      <Box display={tab === 'gallery' ? 'block' : 'none'}>
+        <ImageGallery isActive={tab === 'gallery'} />
+      </Box>
+      <Box display={tab === 'civitai' ? 'block' : 'none'}>
         <CivitaiGallery
           isActive={tab === 'civitai'}
-          appToken={token}
           onUseInputImage={() => setTab('gallery')}
         />
-      </div>
+      </Box>
 
-      <div style={{ marginTop: 16 }} className="muted">
+      <Text fontSize="sm" color="gray.500" mt={8}>
         A modern, database-driven face swapping application.
-      </div>
-    </div>
+      </Text>
+    </Container>
   );
 }

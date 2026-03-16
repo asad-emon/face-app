@@ -9,6 +9,11 @@
     "start": "vite preview --port 3000 --host"
   },
   "dependencies": {
+    "@chakra-ui/react": "^2.10.3",
+    "@chakra-ui/icons": "^2.1.1",
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.4",
+    "framer-motion": "^11.3.30",
     "firebase": "^12.2.1",
     "jszip": "^3.10.1",
     "localforage": "^1.10.0",

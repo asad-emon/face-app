@@ -66,7 +66,8 @@ a { color: #8bb6ff; }
 .tab.active { background: #1e2433; border-color: #2a3347; }
 
 /* Buttons */
-.btn, button {
+.legacy .btn,
+.legacy button {
   padding: 10px 16px; 
   border-radius: 10px; 
   border: 1px solid #2a3347; 
@@ -76,7 +77,8 @@ a { color: #8bb6ff; }
   font-family: inherit;
   font-size: inherit;
 }
-.btn:disabled, button:disabled { opacity: .6; cursor: not-allowed; }
+.legacy .btn:disabled,
+.legacy button:disabled { opacity: .6; cursor: not-allowed; }
 
 .logout-button {
   background: #4a2525;
@@ -95,7 +97,10 @@ a { color: #8bb6ff; }
 }
 
 /* Forms & Inputs */
-input[type="text"], input[type="email"], input[type="password"], select {
+.legacy input[type="text"],
+.legacy input[type="email"],
+.legacy input[type="password"],
+.legacy select {
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
@@ -105,7 +110,7 @@ input[type="text"], input[type="email"], input[type="password"], select {
   font-family: inherit;
 }
 
-input[type="file"] {
+.legacy input[type="file"] {
     font-family: inherit;
     border: 1px solid #2a3347;
     border-radius: 10px;
