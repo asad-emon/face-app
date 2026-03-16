@@ -212,6 +212,15 @@ export default function ImageUpload({ token }) {
     }
   };
 
+  useEffect(() => {
+    const handler = () => {
+      fetchInputImages({ page: 1, pageSize: inputImagePageSize });
+      setInputImagePage(1);
+    };
+    window.addEventListener('input-images:refresh', handler);
+    return () => window.removeEventListener('input-images:refresh', handler);
+  }, [token, inputImagePageSize]);
+
   const handlePersonChange = (personName) => {
     setSelectedPerson(personName);
     const group = modelGroups.find((item) => item.personName === personName);

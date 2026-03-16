@@ -26,6 +26,7 @@ export default function ImageGallery({ token, isActive = false }) {
   const [imagePageSize, setImagePageSize] = useState(IMAGE_PAGE_SIZE);
   const [videoPageSize, setVideoPageSize] = useState(VIDEO_PAGE_SIZE);
   const [previewId, setPreviewId] = useState(null);
+  const [forcedPreview, setForcedPreview] = useState(null);
   const [videoSources, setVideoSources] = useState({});
   const [loadingVideoIds, setLoadingVideoIds] = useState([]);
   const [statusLoadingIds, setStatusLoadingIds] = useState([]);
@@ -315,6 +316,8 @@ export default function ImageGallery({ token, isActive = false }) {
 
   const previewIndex = images.findIndex((image) => image.id === previewId);
   const preview = previewIndex >= 0 ? images[previewIndex] : null;
+  const activePreview = forcedPreview || preview;
+  const isForcedPreview = Boolean(forcedPreview && (!preview || forcedPreview.id !== preview.id));
 
   const showPrevious = () => {
     if (images.length === 0 || previewIndex < 0) return;
@@ -337,15 +340,44 @@ export default function ImageGallery({ token, isActive = false }) {
   }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize]);
 
   useEffect(() => {
-    if (!preview) return undefined;
+    if (!activePreview) return undefined;
     const onKeyDown = (event) => {
-      if (event.key === 'ArrowLeft') showPrevious();
-      else if (event.key === 'ArrowRight') showNext();
-      else if (event.key === 'Escape') setPreviewId(null);
+      if (!isForcedPreview && event.key === 'ArrowLeft') showPrevious();
+      else if (!isForcedPreview && event.key === 'ArrowRight') showNext();
+      else if (event.key === 'Escape') {
+        setPreviewId(null);
+        setForcedPreview(null);
+        setZoomLevel(1);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [preview, previewIndex, images]);
+  }, [activePreview, isForcedPreview, previewIndex, images]);
+
+  useEffect(() => {
+    const handler = async (event) => {
+      const imageId = Number(event?.detail?.imageId);
+      if (!imageId) return;
+      try {
+        const response = await fetch(`${apiBaseUrl}/images/generated/${imageId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json();
+        if (payload?.id) {
+          setForcedPreview(payload);
+          setPreviewId(payload.id);
+          setZoomLevel(1);
+        }
+      } catch (_err) {
+        // noop
+      }
+    };
+    window.addEventListener('gallery:open', handler);
+    return () => window.removeEventListener('gallery:open', handler);
+  }, [token]);
 
   useEffect(() => {
     videoSourcesRef.current = videoSources;
@@ -625,11 +657,12 @@ export default function ImageGallery({ token, isActive = false }) {
         </>
       )}
 
-      {preview && (
+      {activePreview && (
         <div
           className="modal"
           onClick={() => {
             setPreviewId(null);
+            setForcedPreview(null);
             setZoomLevel(1);
           }}
         >
@@ -638,23 +671,26 @@ export default function ImageGallery({ token, isActive = false }) {
             onClick={(event) => {
               event.stopPropagation();
               setPreviewId(null);
+              setForcedPreview(null);
               setZoomLevel(1);
             }}
           >
             &times;
           </button>
-          <button
-            className="btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              showPrevious();
-            }}
-            style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)' }}
-          >
-            &larr;
-          </button>
+          {!isForcedPreview && (
+            <button
+              className="btn"
+              onClick={(event) => {
+                event.stopPropagation();
+                showPrevious();
+              }}
+              style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)' }}
+            >
+              &larr;
+            </button>
+          )}
           <img
-            src={`data:image/jpeg;base64,${preview.data}`}
+            src={`data:image/jpeg;base64,${activePreview.data}`}
             alt="Preview"
             className="modal-content"
             onClick={(event) => event.stopPropagation()}
@@ -663,22 +699,26 @@ export default function ImageGallery({ token, isActive = false }) {
               transition: 'transform 120ms ease-out',
             }}
           />
-          <button
-            className="btn"
-            onClick={(event) => {
-              event.stopPropagation();
-              showNext();
-            }}
-            style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)' }}
-          >
-            &rarr;
-          </button>
-          <div
-            className="muted"
-            style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}
-          >
-            {previewIndex + 1} / {images.length}
-          </div>
+          {!isForcedPreview && (
+            <button
+              className="btn"
+              onClick={(event) => {
+                event.stopPropagation();
+                showNext();
+              }}
+              style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)' }}
+            >
+              &rarr;
+            </button>
+          )}
+          {!isForcedPreview && (
+            <div
+              className="muted"
+              style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}
+            >
+              {previewIndex + 1} / {images.length}
+            </div>
+          )}
           <div
             className="row"
             style={{ position: 'absolute', bottom: 16, right: 16, gap: 8, alignItems: 'center' }}
@@ -700,7 +740,7 @@ export default function ImageGallery({ token, isActive = false }) {
             className="btn"
             onClick={(event) => {
               event.stopPropagation();
-              deleteImages([preview.id]);
+              deleteImages([activePreview.id]);
             }}
             disabled={busy || deleting}
             style={{
@@ -718,9 +758,9 @@ export default function ImageGallery({ token, isActive = false }) {
             className="btn"
             onClick={(event) => {
               event.stopPropagation();
-              deleteSourceImage(preview.input_image_id);
+              deleteSourceImage(activePreview.input_image_id);
             }}
-            disabled={busy || deleting || !preview.input_image_id}
+            disabled={busy || deleting || !activePreview.input_image_id}
             style={{
               position: 'absolute',
               top: 20,

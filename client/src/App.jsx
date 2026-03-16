@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import ImageGallery from './ImageGallery';
 import ImageUpload from './ImageUpload';
 import ModelUpload from './ModelUpload';
 import Login from './Login';
+import CivitaiGallery from './CivitaiGallery';
 import './styles.css';
 
 function TabButton({ active, onClick, children }) {
@@ -31,6 +32,7 @@ export default function App() {
         <TabButton active={tab === 'model'} onClick={() => setTab('model')}>Model Upload</TabButton>
         <TabButton active={tab === 'upload'} onClick={() => setTab('upload')}>Swap</TabButton>
         <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')}>Gallery</TabButton>
+        <TabButton active={tab === 'civitai'} onClick={() => setTab('civitai')}>Civitai</TabButton>
       </div>
 
       <div style={{ display: tab === 'model' ? 'block' : 'none' }}>
@@ -41,6 +43,13 @@ export default function App() {
       </div>
       <div style={{ display: tab === 'gallery' ? 'block' : 'none' }}>
         <ImageGallery token={token} isActive={tab === 'gallery'} />
+      </div>
+      <div style={{ display: tab === 'civitai' ? 'block' : 'none' }}>
+        <CivitaiGallery
+          isActive={tab === 'civitai'}
+          appToken={token}
+          onUseInputImage={() => setTab('gallery')}
+        />
       </div>
 
       <div style={{ marginTop: 16 }} className="muted">

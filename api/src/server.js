@@ -1068,6 +1068,22 @@ app.get("/images/generated", requireAuth, async (req, res) => {
   });
 });
 
+app.get("/images/generated/:id(\\d+)", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid generated image id" });
+  }
+
+  const image = await GeneratedImage.findOne({
+    where: { id, owner_id: req.user.id },
+  });
+  if (!image) {
+    return res.status(404).json({ detail: "Generated image not found" });
+  }
+
+  return res.json(serializeGeneratedImage(image));
+});
+
 app.delete("/images/generated/:id(\\d+)", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!id) {
@@ -1334,7 +1350,7 @@ app.delete("/videos/generated", requireAuth, async (req, res) => {
 
 app.post("/swap-jobs", requireAuth, async (req, res) => {
   const modelId = Number(req.body?.model_id);
-  const enableRestore = parseBoolean(req.body?.enable_restore, false);
+  const enableRestore = parseBoolean(req.body?.enable_restore, true);
   const imageIds = Array.isArray(req.body?.image_ids)
     ? req.body.image_ids
         .map((value) => Number(value))
@@ -1427,7 +1443,7 @@ app.post("/swap", requireAuth, async (req, res) => {
   const imageId = Number(req.query.image_id || req.body.image_id);
   const enableRestore = parseBoolean(
     req.query.enable_restore ?? req.body.enable_restore,
-    false
+    true
   );
 
   if (!modelId || !imageId) {
