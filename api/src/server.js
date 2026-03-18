@@ -15,7 +15,7 @@ import civitaiRoutes from "./routes/civitai.js";
 
 const app = express();
 
-const origins = [CLIENT_ORIGIN];
+const origins = CLIENT_ORIGIN ? [CLIENT_ORIGIN, /\.replit\.dev$/] : true;
 
 app.use(
   cors({
