@@ -11,6 +11,7 @@ import imageRoutes from "./routes/images.js";
 import videoRoutes from "./routes/videos.js";
 import swapRoutes from "./routes/swaps.js";
 import internalRoutes from "./routes/internal.js";
+import civitaiRoutes from "./routes/civitai.js";
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use(imageRoutes);
 app.use(videoRoutes);
 app.use(swapRoutes);
 app.use(internalRoutes);
+app.use(civitaiRoutes);
 
 async function start() {
   try {
