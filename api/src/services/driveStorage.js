@@ -5,16 +5,16 @@ const SCOPES = ["https://www.googleapis.com/auth/drive"];
 
 let driveClientPromise = null;
 
-function getCredentials() {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!raw) {
-    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is not configured");
+function getOAuthConfig() {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      "Google OAuth not configured: GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REFRESH_TOKEN are required"
+    );
   }
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    throw new Error(`GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON: ${err.message}`);
-  }
+  return { clientId, clientSecret, refreshToken };
 }
 
 function getFolderId() {
@@ -28,13 +28,10 @@ function getFolderId() {
 async function getDriveClient() {
   if (!driveClientPromise) {
     driveClientPromise = (async () => {
-      const credentials = getCredentials();
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: SCOPES,
-      });
-      const authClient = await auth.getClient();
-      return google.drive({ version: "v3", auth: authClient });
+      const { clientId, clientSecret, refreshToken } = getOAuthConfig();
+      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+      oauth2Client.setCredentials({ refresh_token: refreshToken, scope: SCOPES.join(" ") });
+      return google.drive({ version: "v3", auth: oauth2Client });
     })().catch((err) => {
       driveClientPromise = null;
       throw err;

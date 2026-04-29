@@ -34,15 +34,20 @@ The inference service (Python/FastAPI) requires GPU/heavy dependencies and is in
 ## File Storage
 
 Binary file payloads (face model `.safetensors`, input images, generated
-images, generated videos) are stored in **Google Drive** via a Google
-**service account** (manual credentials, not the Replit Drive integration —
-that OAuth flow was declined). MongoDB only stores Drive references
+images, generated videos) are stored in **Google Drive** via **OAuth 2.0
+delegation** (manual user-provided credentials — the Replit Drive
+connector was declined and service accounts cannot upload to personal
+Drive due to no storage quota). MongoDB only stores Drive references
 (`drive_file_id`, `mime_type`, `size`).
 
 Required secrets:
-- `GOOGLE_SERVICE_ACCOUNT_JSON` — full JSON of the service account key
-- `GOOGLE_DRIVE_FOLDER_ID` — Drive folder ID shared with the service
-  account email (Editor access). Drive API must be enabled in the GCP
+- `GOOGLE_OAUTH_CLIENT_ID` — OAuth 2.0 client ID from GCP
+- `GOOGLE_OAUTH_CLIENT_SECRET` — OAuth 2.0 client secret
+- `GOOGLE_OAUTH_REFRESH_TOKEN` — long-lived refresh token with
+  `https://www.googleapis.com/auth/drive` scope (typically generated
+  via Google OAuth Playground)
+- `GOOGLE_DRIVE_FOLDER_ID` — destination folder ID owned by the user
+  who granted the refresh token. Drive API must be enabled in the GCP
   project.
 
 ## Database
