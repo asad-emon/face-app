@@ -1,84 +1,68 @@
 import { FaceModel } from "../db.js";
 
-export async function resolveVersion(ownerId, personName, requestedVersion, transaction) {
+export async function resolveVersion(ownerId, personName, requestedVersion) {
   if (requestedVersion !== null) {
     return requestedVersion;
   }
 
   const latestModel = await FaceModel.findOne({
-    where: {
-      owner_id: ownerId,
-      person_name: personName,
-      is_deleted: false,
-    },
-    order: [["version", "DESC"]],
-    transaction,
-  });
+    owner_id: ownerId,
+    person_name: personName,
+    is_deleted: false,
+  })
+    .sort({ version: -1 })
+    .lean();
   const latestVersion = latestModel?.version || 0;
   return latestVersion + 1;
 }
 
-export async function setActiveModel(ownerId, personName, modelId, transaction) {
-  await FaceModel.update(
-    { is_active: false },
+export async function setActiveModel(ownerId, personName, modelId) {
+  await FaceModel.updateMany(
     {
-      where: {
-        owner_id: ownerId,
-        person_name: personName,
-        is_deleted: false,
-      },
-      transaction,
-    }
+      owner_id: ownerId,
+      person_name: personName,
+      is_deleted: false,
+    },
+    { $set: { is_active: false } }
   );
 
-  await FaceModel.update(
-    { is_active: true },
+  await FaceModel.updateOne(
     {
-      where: {
-        id: modelId,
-        owner_id: ownerId,
-        is_deleted: false,
-      },
-      transaction,
-    }
+      id: modelId,
+      owner_id: ownerId,
+      is_deleted: false,
+    },
+    { $set: { is_active: true } }
   );
 }
 
-export async function ensureActiveForPerson(ownerId, personName, transaction) {
+export async function ensureActiveForPerson(ownerId, personName) {
   const activeModel = await FaceModel.findOne({
-    where: {
-      owner_id: ownerId,
-      person_name: personName,
-      is_active: true,
-      is_deleted: false,
-    },
-    transaction,
-  });
+    owner_id: ownerId,
+    person_name: personName,
+    is_active: true,
+    is_deleted: false,
+  }).lean();
   if (activeModel) {
     return;
   }
 
   const fallbackModel = await FaceModel.findOne({
-    where: {
-      owner_id: ownerId,
-      person_name: personName,
-      is_deleted: false,
-    },
-    order: [["version", "DESC"], ["id", "DESC"]],
-    transaction,
-  });
+    owner_id: ownerId,
+    person_name: personName,
+    is_deleted: false,
+  })
+    .sort({ version: -1, id: -1 })
+    .lean();
   if (!fallbackModel) {
     return;
   }
 
-  await FaceModel.update(
-    { is_active: true },
+  await FaceModel.updateOne(
     {
-      where: {
-        id: fallbackModel.id,
-        owner_id: ownerId,
-      },
-      transaction,
-    }
+      id: fallbackModel.id,
+      owner_id: ownerId,
+    },
+    { $set: { is_active: true } }
   );
 }

@@ -40,9 +40,9 @@ app.use(civitaiRoutes);
 async function start() {
   try {
     await initDb();
-    await SwapJob.update(
-      { status: "queued", started_at: null, error: null },
-      { where: { status: "processing" } }
+    await SwapJob.updateMany(
+      { status: "processing" },
+      { $set: { status: "queued", started_at: null, error: null } }
     );
     await bootstrapSwapQueue();
 

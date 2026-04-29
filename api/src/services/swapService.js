@@ -36,11 +36,11 @@ async function runSwapRemote(model, image, modelId, enableRestore) {
     const form = new FormData();
     form.append("model_id", String(modelId));
     form.append("enable_restore", enableRestore ? "1" : "0");
-    form.append("model_file", model.data, {
+    form.append("model_file", Buffer.from(model.data), {
       filename: "model.safetensors",
       contentType: "application/octet-stream",
     });
-    form.append("target_image", image.data, {
+    form.append("target_image", Buffer.from(image.data), {
       filename: image.filename || "target.png",
       contentType: "image/png",
     });
@@ -74,11 +74,14 @@ async function runSwapRemote(model, image, modelId, enableRestore) {
 
 export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) {
   const model = await FaceModel.findOne({
-    where: { id: modelId, owner_id: ownerId, is_deleted: false },
-  });
+    id: modelId,
+    owner_id: ownerId,
+    is_deleted: false,
+  }).lean();
   const image = await InputImage.findOne({
-    where: { id: imageId, owner_id: ownerId },
-  });
+    id: imageId,
+    owner_id: ownerId,
+  }).lean();
   if (!model || !image) {
     throw new Error("Model or image not found");
   }
@@ -115,7 +118,7 @@ export async function triggerVideoSwap({
   if (callbackToken) {
     form.append("callback_token", callbackToken);
   }
-  form.append("model_file", model.data, {
+  form.append("model_file", Buffer.from(model.data), {
     filename: "model.safetensors",
     contentType: "application/octet-stream",
   });
@@ -136,9 +139,9 @@ export async function triggerVideoSwap({
       response.data.resume();
     }
   } catch (err) {
-    await GeneratedVideo.update(
-      { processing: false },
-      { where: { id: generatedVideoId } }
+    await GeneratedVideo.updateOne(
+      { id: generatedVideoId },
+      { $set: { processing: false } }
     );
     logApiError("triggerVideoSwap", err);
   }
@@ -160,17 +163,16 @@ async function processSwapQueue() {
   try {
     while (swapQueue.length > 0) {
       const jobId = swapQueue.shift();
-      const job = await SwapJob.findByPk(jobId);
+      const job = await SwapJob.findOne({ id: jobId });
       if (!job || job.status !== "queued") {
         continue;
       }
 
-      await job.update({
-        status: "processing",
-        error: null,
-        started_at: new Date(),
-        finished_at: null,
-      });
+      job.status = "processing";
+      job.error = null;
+      job.started_at = new Date();
+      job.finished_at = null;
+      await job.save();
 
       try {
         const { generatedImageId } = await runSwapAndStore(
@@ -179,19 +181,17 @@ async function processSwapQueue() {
           job.input_image_id,
           Boolean(job.enable_restore)
         );
-        await job.update({
-          status: "done",
-          generated_image_id: generatedImageId,
-          error: null,
-          finished_at: new Date(),
-        });
+        job.status = "done";
+        job.generated_image_id = generatedImageId;
+        job.error = null;
+        job.finished_at = new Date();
+        await job.save();
       } catch (err) {
         const detail = getErrorDetail(err).slice(0, 2000);
-        await job.update({
-          status: "failed",
-          error: detail,
-          finished_at: new Date(),
-        });
+        job.status = "failed";
+        job.error = detail;
+        job.finished_at = new Date();
+        await job.save();
         logApiError(`processSwapQueue job ${job.id}`, err);
       }
     }
@@ -204,10 +204,9 @@ async function processSwapQueue() {
 }
 
 export async function bootstrapSwapQueue() {
-  const queuedJobs = await SwapJob.findAll({
-    where: { status: "queued" },
-    attributes: ["id"],
-    order: [["id", "ASC"]],
-  });
+  const queuedJobs = await SwapJob.find({ status: "queued" })
+    .select({ id: 1 })
+    .sort({ id: 1 })
+    .lean();
   queuedJobs.forEach((job) => enqueueSwapJob(job.id));
 }

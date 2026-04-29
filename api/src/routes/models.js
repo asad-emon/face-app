@@ -1,7 +1,7 @@
 import express from "express";
 import axios from "axios";
 import FormData from "form-data";
-import { FaceModel, sequelize } from "../db.js";
+import { FaceModel } from "../db.js";
 import { INFERENCE_BASE_URL } from "../config.js";
 import upload from "../middleware/upload.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -56,69 +56,51 @@ router.post(
         timeout: 120000,
       });
 
-      const model = await sequelize.transaction(async (transaction) => {
-        const version = await resolveVersion(
-          req.user.id,
-          personName,
-          requestedVersion,
-          transaction
-        );
+      const version = await resolveVersion(
+        req.user.id,
+        personName,
+        requestedVersion
+      );
 
-        const existing = await FaceModel.findOne({
-          where: {
-            owner_id: req.user.id,
-            person_name: personName,
-            version,
-            is_deleted: false,
-          },
-          transaction,
-        });
+      const existing = await FaceModel.findOne({
+        owner_id: req.user.id,
+        person_name: personName,
+        version,
+        is_deleted: false,
+      }).lean();
 
-        if (existing) {
-          throw new Error("VERSION_CONFLICT");
-        }
-
-        const createdModel = await FaceModel.create(
-          {
-            name: `${personName} v${version}`,
-            person_name: personName,
-            version,
-            is_active: false,
-            data: Buffer.from(response.data),
-            owner_id: req.user.id,
-          },
-          { transaction }
-        );
-
-        const activeModel = await FaceModel.findOne({
-          where: {
-            owner_id: req.user.id,
-            person_name: personName,
-            is_active: true,
-            is_deleted: false,
-          },
-          transaction,
-        });
-
-        if (setActive || !activeModel) {
-          await setActiveModel(
-            req.user.id,
-            personName,
-            createdModel.id,
-            transaction
-          );
-        }
-
-        return createdModel;
-      });
-
-      return res.json(serializeFaceModel(model));
-    } catch (err) {
-      if (err.message === "VERSION_CONFLICT") {
+      if (existing) {
         return res.status(409).json({
           detail: `Version already exists for ${personName}. Choose another version.`,
         });
       }
+
+      const createdModel = await FaceModel.create({
+        name: `${personName} v${version}`,
+        person_name: personName,
+        version,
+        is_active: false,
+        data: Buffer.from(response.data),
+        owner_id: req.user.id,
+      });
+
+      const activeModel = await FaceModel.findOne({
+        owner_id: req.user.id,
+        person_name: personName,
+        is_active: true,
+        is_deleted: false,
+      }).lean();
+
+      if (setActive || !activeModel) {
+        await setActiveModel(req.user.id, personName, createdModel.id);
+      }
+
+      const refreshed = await FaceModel.findOne({
+        id: createdModel.id,
+      }).lean();
+
+      return res.json(serializeFaceModel(refreshed || createdModel));
+    } catch (err) {
       logApiError("POST /models/generate", err);
       const detail = err.response?.data?.detail || err.message;
       return res.status(502).json({ detail: `Embedding service failed: ${detail}` });
@@ -149,64 +131,51 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
   }
 
   try {
-    const model = await sequelize.transaction(async (transaction) => {
-      const version = await resolveVersion(
-        req.user.id,
-        personName,
-        requestedVersion,
-        transaction
-      );
+    const version = await resolveVersion(
+      req.user.id,
+      personName,
+      requestedVersion
+    );
 
-      const existing = await FaceModel.findOne({
-        where: {
-          owner_id: req.user.id,
-          person_name: personName,
-          version,
-          is_deleted: false,
-        },
-        transaction,
-      });
+    const existing = await FaceModel.findOne({
+      owner_id: req.user.id,
+      person_name: personName,
+      version,
+      is_deleted: false,
+    }).lean();
 
-      if (existing) {
-        throw new Error("VERSION_CONFLICT");
-      }
-
-      const createdModel = await FaceModel.create(
-        {
-          name: `${personName} v${version}`,
-          person_name: personName,
-          version,
-          is_active: false,
-          data: file.buffer,
-          owner_id: req.user.id,
-        },
-        { transaction }
-      );
-
-      const activeModel = await FaceModel.findOne({
-        where: {
-          owner_id: req.user.id,
-          person_name: personName,
-          is_active: true,
-          is_deleted: false,
-        },
-        transaction,
-      });
-
-      if (setActive || !activeModel) {
-        await setActiveModel(req.user.id, personName, createdModel.id, transaction);
-      }
-
-      return createdModel;
-    });
-
-    return res.json(serializeFaceModel(model));
-  } catch (err) {
-    if (err.message === "VERSION_CONFLICT") {
+    if (existing) {
       return res.status(409).json({
         detail: `Version already exists for ${personName}. Choose another version.`,
       });
     }
+
+    const createdModel = await FaceModel.create({
+      name: `${personName} v${version}`,
+      person_name: personName,
+      version,
+      is_active: false,
+      data: file.buffer,
+      owner_id: req.user.id,
+    });
+
+    const activeModel = await FaceModel.findOne({
+      owner_id: req.user.id,
+      person_name: personName,
+      is_active: true,
+      is_deleted: false,
+    }).lean();
+
+    if (setActive || !activeModel) {
+      await setActiveModel(req.user.id, personName, createdModel.id);
+    }
+
+    const refreshed = await FaceModel.findOne({
+      id: createdModel.id,
+    }).lean();
+
+    return res.json(serializeFaceModel(refreshed || createdModel));
+  } catch (err) {
     logApiError("POST /models/upload", err);
     return res.status(500).json({ detail: "Model upload failed" });
   }
@@ -214,15 +183,13 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
 
 router.get("/models", requireAuth, async (req, res) => {
   const limit = Number(req.query.limit || 100);
-  const models = await FaceModel.findAll({
-    where: { owner_id: req.user.id, is_deleted: false },
-    order: [
-      ["person_name", "ASC"],
-      ["version", "DESC"],
-      ["id", "DESC"],
-    ],
-    limit,
-  });
+  const models = await FaceModel.find({
+    owner_id: req.user.id,
+    is_deleted: false,
+  })
+    .sort({ person_name: 1, version: -1, id: -1 })
+    .limit(limit)
+    .lean();
   return res.json(models.map(serializeFaceModel));
 });
 
@@ -233,24 +200,25 @@ router.put("/models/:id/activate", requireAuth, async (req, res) => {
   }
 
   const model = await FaceModel.findOne({
-    where: { id, owner_id: req.user.id, is_deleted: false },
-  });
+    id,
+    owner_id: req.user.id,
+    is_deleted: false,
+  }).lean();
   if (!model) {
     return res.status(404).json({ detail: "Model not found" });
   }
 
-  await sequelize.transaction(async (transaction) => {
-    await setActiveModel(
-      req.user.id,
-      model.person_name || model.name,
-      model.id,
-      transaction
-    );
-  });
+  await setActiveModel(
+    req.user.id,
+    model.person_name || model.name,
+    model.id
+  );
 
   const updated = await FaceModel.findOne({
-    where: { id, owner_id: req.user.id, is_deleted: false },
-  });
+    id,
+    owner_id: req.user.id,
+    is_deleted: false,
+  }).lean();
 
   return res.json(serializeFaceModel(updated));
 });
@@ -262,38 +230,30 @@ router.delete("/models/:id", requireAuth, async (req, res) => {
   }
 
   try {
-    const result = await sequelize.transaction(async (transaction) => {
-      const model = await FaceModel.findOne({
-        where: { id, owner_id: req.user.id, is_deleted: false },
-        transaction,
-      });
-      if (!model) {
-        return null;
-      }
-
-      const personName = model.person_name || model.name;
-      const wasActive = Boolean(model.is_active);
-
-      const deleted = await FaceModel.update(
-        { is_deleted: true, is_active: false },
-        {
-          where: { id, owner_id: req.user.id, is_deleted: false },
-          transaction,
-        }
-      );
-
-      if (deleted[0] > 0 && wasActive) {
-        await ensureActiveForPerson(req.user.id, personName, transaction);
-      }
-
-      return { deleted: deleted[0] };
-    });
-
-    if (!result) {
+    const model = await FaceModel.findOne({
+      id,
+      owner_id: req.user.id,
+      is_deleted: false,
+    }).lean();
+    if (!model) {
       return res.status(404).json({ detail: "Model not found" });
     }
 
-    return res.json(result);
+    const personName = model.person_name || model.name;
+    const wasActive = Boolean(model.is_active);
+
+    const updateResult = await FaceModel.updateOne(
+      { id, owner_id: req.user.id, is_deleted: false },
+      { $set: { is_deleted: true, is_active: false } }
+    );
+
+    const deletedCount = updateResult.modifiedCount || 0;
+
+    if (deletedCount > 0 && wasActive) {
+      await ensureActiveForPerson(req.user.id, personName);
+    }
+
+    return res.json({ deleted: deletedCount });
   } catch (err) {
     logApiError("DELETE /models/:id", err);
     return res.status(500).json({ detail: "Model deletion failed" });
@@ -307,22 +267,21 @@ router.delete("/models/person/:personName", requireAuth, async (req, res) => {
   }
 
   try {
-    const deleted = await FaceModel.update(
-      { is_deleted: true, is_active: false },
+    const updateResult = await FaceModel.updateMany(
       {
-        where: {
-          owner_id: req.user.id,
-          person_name: personName,
-          is_deleted: false,
-        },
-      }
+        owner_id: req.user.id,
+        person_name: personName,
+        is_deleted: false,
+      },
+      { $set: { is_deleted: true, is_active: false } }
     );
 
-    if (deleted[0] === 0) {
+    const deletedCount = updateResult.modifiedCount || 0;
+    if (deletedCount === 0) {
       return res.status(404).json({ detail: "No models found for person" });
     }
 
-    return res.json({ deleted: deleted[0] });
+    return res.json({ deleted: deletedCount });
   } catch (err) {
     logApiError("DELETE /models/person/:personName", err);
     return res.status(500).json({ detail: "Model deletion failed" });

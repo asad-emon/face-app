@@ -11,7 +11,7 @@ A multi-component face-swapping web application using AI.
 ## Tech Stack
 
 - **Frontend**: React 18, Vite, Chakra UI, Firebase (auth/storage)
-- **Backend**: Node.js, Express, Sequelize ORM, PostgreSQL
+- **Backend**: Node.js, Express, Mongoose ODM, MongoDB Atlas
 - **Inference**: Python, FastAPI, InsightFace, ONNX Runtime, OpenCV
 
 ## Workflows
@@ -23,7 +23,7 @@ The inference service (Python/FastAPI) requires GPU/heavy dependencies and is in
 
 ## Environment Variables
 
-- `DATABASE_URL` — PostgreSQL connection string (set by Replit database)
+- `MONGODB_URI` — MongoDB Atlas connection string (secret)
 - `CLIENT_ORIGIN` — Frontend URL for CORS
 - `JWT_SECRET` — Secret for JSON web tokens
 - `PORT` — API port (8080)
@@ -33,9 +33,14 @@ The inference service (Python/FastAPI) requires GPU/heavy dependencies and is in
 
 ## Database
 
-Uses Replit's built-in PostgreSQL. The API uses Sequelize ORM and auto-syncs tables on startup.
+Uses MongoDB Atlas via Mongoose ODM. A `counters` collection provides
+auto-incrementing integer `id` fields so the public API contract (numeric
+IDs) stays stable for the frontend.
 
-Tables: `users`, `face_models`, `input_images`, `generated_images`, `generated_videos`, `swap_jobs`
+Collections: `users`, `face_models`, `input_images`, `generated_images`, `generated_videos`, `swap_jobs`, `counters`
+
+The Atlas cluster's Network Access list must allow connections from Replit
+(easiest: allow `0.0.0.0/0`, since Replit egress IPs are not stable).
 
 ## Frontend Configuration
 

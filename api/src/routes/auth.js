@@ -25,7 +25,7 @@ router.post("/token", async (req, res) => {
     return res.status(400).json({ detail: "Missing username or password" });
   }
 
-  const user = await User.findOne({ where: { email: username } });
+  const user = await User.findOne({ email: username });
   if (!user) {
     return res
       .status(401)
@@ -48,7 +48,7 @@ router.post("/users", async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ detail: "Email and password required" });
   }
-  const existing = await User.findOne({ where: { email } });
+  const existing = await User.findOne({ email });
   if (existing) {
     return res.status(400).json({ detail: "Email already registered" });
   }

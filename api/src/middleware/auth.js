@@ -17,7 +17,7 @@ export async function requireAuth(req, res, next) {
     if (!email) {
       return res.status(401).json({ detail: "Could not validate credentials" });
     }
-    const user = await User.findOne({ where: { email } });
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ detail: "Could not validate credentials" });
     }

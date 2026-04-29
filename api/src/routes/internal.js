@@ -19,7 +19,7 @@ router.post(
       return res.status(400).json({ detail: "No video uploaded" });
     }
 
-    const video = await GeneratedVideo.findByPk(id);
+    const video = await GeneratedVideo.findOne({ id });
     if (!video) {
       return res.status(404).json({ detail: "Video not found" });
     }
@@ -39,15 +39,14 @@ router.post(
       ? Math.max(0, Math.min(100, parsedProgress))
       : 100;
 
-    await video.update({
-      filename: req.body?.filename || file.originalname || video.filename,
-      mime_type: req.body?.mime_type || file.mimetype || "video/mp4",
-      processing: false,
-      total_frames: totalFrames || 0,
-      processed_frames: processedFrames || 0,
-      progress_percent: progressPercent,
-      data: file.buffer,
-    });
+    video.filename = req.body?.filename || file.originalname || video.filename;
+    video.mime_type = req.body?.mime_type || file.mimetype || "video/mp4";
+    video.processing = false;
+    video.total_frames = totalFrames || 0;
+    video.processed_frames = processedFrames || 0;
+    video.progress_percent = progressPercent;
+    video.data = file.buffer;
+    await video.save();
 
     return res.json({ id: video.id, processing: false });
   }
@@ -62,7 +61,7 @@ router.post(
       return res.status(400).json({ detail: "Invalid video id" });
     }
 
-    const video = await GeneratedVideo.findByPk(id);
+    const video = await GeneratedVideo.findOne({ id });
     if (!video) {
       return res.status(404).json({ detail: "Video not found" });
     }
@@ -85,11 +84,10 @@ router.post(
       progressPercent = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
     }
 
-    await video.update({
-      total_frames: totalFrames || 0,
-      processed_frames: processedFrames || 0,
-      progress_percent: progressPercent ?? video.progress_percent ?? 0,
-    });
+    video.total_frames = totalFrames || 0;
+    video.processed_frames = processedFrames || 0;
+    video.progress_percent = progressPercent ?? video.progress_percent ?? 0;
+    await video.save();
 
     return res.json({
       id: video.id,

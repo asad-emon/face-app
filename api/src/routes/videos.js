@@ -1,5 +1,4 @@
 import express from "express";
-import { Op } from "sequelize";
 import { GeneratedVideo } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { serializeGeneratedVideo } from "../utils/serialize.js";
@@ -15,12 +14,11 @@ router.get("/videos/generated", requireAuth, async (req, res) => {
       ? Math.min(parsedLimit, 100)
       : 8;
 
-  const { count, rows } = await GeneratedVideo.findAndCountAll({
-    where: { owner_id: req.user.id },
-    order: [["id", "DESC"]],
-    offset: skip,
-    limit,
-  });
+  const filter = { owner_id: req.user.id };
+  const [rows, count] = await Promise.all([
+    GeneratedVideo.find(filter).sort({ id: -1 }).skip(skip).limit(limit).lean(),
+    GeneratedVideo.countDocuments(filter),
+  ]);
   return res.json({
     items: rows.map(serializeGeneratedVideo),
     total: count,
@@ -35,9 +33,7 @@ router.get("/videos/generated/:id/status", requireAuth, async (req, res) => {
     return res.status(400).json({ detail: "Invalid video id" });
   }
 
-  const video = await GeneratedVideo.findOne({
-    where: { id, owner_id: req.user.id },
-  });
+  const video = await GeneratedVideo.findOne({ id, owner_id: req.user.id }).lean();
   if (!video) {
     return res.status(404).json({ detail: "Video not found" });
   }
@@ -58,9 +54,7 @@ router.get("/videos/generated/:id/content", requireAuth, async (req, res) => {
     return res.status(400).json({ detail: "Invalid video id" });
   }
 
-  const video = await GeneratedVideo.findOne({
-    where: { id, owner_id: req.user.id },
-  });
+  const video = await GeneratedVideo.findOne({ id, owner_id: req.user.id }).lean();
   if (!video) {
     return res.status(404).json({ detail: "Video not found" });
   }
@@ -119,15 +113,13 @@ router.delete("/videos/generated/:id", requireAuth, async (req, res) => {
     return res.status(400).json({ detail: "Invalid video id" });
   }
 
-  const deleted = await GeneratedVideo.destroy({
-    where: { id, owner_id: req.user.id },
-  });
+  const result = await GeneratedVideo.deleteOne({ id, owner_id: req.user.id });
 
-  if (deleted === 0) {
+  if ((result.deletedCount || 0) === 0) {
     return res.status(404).json({ detail: "Video not found" });
   }
 
-  return res.json({ deleted });
+  return res.json({ deleted: result.deletedCount });
 });
 
 router.delete("/videos/generated", requireAuth, async (req, res) => {
@@ -142,14 +134,12 @@ router.delete("/videos/generated", requireAuth, async (req, res) => {
   }
 
   const uniqueIds = [...new Set(ids)];
-  const deleted = await GeneratedVideo.destroy({
-    where: {
-      owner_id: req.user.id,
-      id: { [Op.in]: uniqueIds },
-    },
+  const result = await GeneratedVideo.deleteMany({
+    owner_id: req.user.id,
+    id: { $in: uniqueIds },
   });
 
-  return res.json({ deleted });
+  return res.json({ deleted: result.deletedCount || 0 });
 });
 
 export default router;

@@ -1,6 +1,5 @@
 import express from "express";
-import { Op } from "sequelize";
-import { FaceModel, GeneratedVideo, InputImage, SwapJob, sequelize } from "../db.js";
+import { FaceModel, GeneratedVideo, InputImage, SwapJob } from "../db.js";
 import { INFERENCE_BASE_URL, INFERENCE_CALLBACK_TOKEN, SWAP_QUEUE_POLL_LIMIT } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
@@ -29,47 +28,43 @@ router.post("/swap-jobs", requireAuth, async (req, res) => {
   }
 
   const model = await FaceModel.findOne({
-    where: { id: modelId, owner_id: req.user.id, is_deleted: false },
-    attributes: ["id"],
-  });
+    id: modelId,
+    owner_id: req.user.id,
+    is_deleted: false,
+  })
+    .select({ id: 1 })
+    .lean();
   if (!model) {
     return res.status(404).json({ detail: "Model not found" });
   }
 
   const uniqueImageIds = [...new Set(imageIds)];
-  const ownedImages = await InputImage.findAll({
-    where: {
-      owner_id: req.user.id,
-      id: { [Op.in]: uniqueImageIds },
-    },
-    attributes: ["id"],
-  });
+  const ownedImages = await InputImage.find({
+    owner_id: req.user.id,
+    id: { $in: uniqueImageIds },
+  })
+    .select({ id: 1 })
+    .lean();
   if (ownedImages.length !== uniqueImageIds.length) {
     return res.status(404).json({ detail: "One or more input images were not found" });
   }
 
-  const jobs = await sequelize.transaction(async (transaction) => {
-    const created = [];
-    for (const imageId of uniqueImageIds) {
-      const job = await SwapJob.create(
-        {
-          owner_id: req.user.id,
-          face_model_id: modelId,
-          input_image_id: imageId,
-          enable_restore: enableRestore,
-          status: "queued",
-        },
-        { transaction }
-      );
-      created.push(job);
-    }
-    return created;
-  });
+  const created = [];
+  for (const imageId of uniqueImageIds) {
+    const job = await SwapJob.create({
+      owner_id: req.user.id,
+      face_model_id: modelId,
+      input_image_id: imageId,
+      enable_restore: enableRestore,
+      status: "queued",
+    });
+    created.push(job);
+  }
 
-  jobs.forEach((job) => enqueueSwapJob(job.id));
+  created.forEach((job) => enqueueSwapJob(job.id));
   return res.status(202).json({
-    items: jobs.map(serializeSwapJob),
-    total: jobs.length,
+    items: created.map(serializeSwapJob),
+    total: created.length,
   });
 });
 
@@ -87,14 +82,13 @@ router.get("/swap-jobs", requireAuth, async (req, res) => {
   }
 
   const uniqueIds = [...new Set(ids)];
-  const jobs = await SwapJob.findAll({
-    where: {
-      owner_id: req.user.id,
-      id: { [Op.in]: uniqueIds },
-    },
-    order: [["id", "ASC"]],
-    limit: SWAP_QUEUE_POLL_LIMIT,
-  });
+  const jobs = await SwapJob.find({
+    owner_id: req.user.id,
+    id: { $in: uniqueIds },
+  })
+    .sort({ id: 1 })
+    .limit(SWAP_QUEUE_POLL_LIMIT)
+    .lean();
 
   return res.json({
     items: jobs.map(serializeSwapJob),
@@ -148,7 +142,9 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
   }
 
   const model = await FaceModel.findOne({
-    where: { id: modelId, owner_id: req.user.id, is_deleted: false },
+    id: modelId,
+    owner_id: req.user.id,
+    is_deleted: false,
   });
   if (!model) {
     return res.status(404).json({ detail: "Model not found" });
@@ -193,9 +189,9 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
     return res.status(202).json(serializeGeneratedVideo(generatedVideo));
   } catch (err) {
     if (generatedVideo) {
-      await GeneratedVideo.update(
-        { processing: false },
-        { where: { id: generatedVideo.id, owner_id: req.user.id } }
+      await GeneratedVideo.updateOne(
+        { id: generatedVideo.id, owner_id: req.user.id },
+        { $set: { processing: false } }
       );
     }
     logApiError("POST /swap-video", err);
