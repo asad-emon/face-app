@@ -11,8 +11,8 @@ channel = "stable-25_05"
 CLIENT_ORIGIN = "https://8d90973b-07ef-4aee-8062-0672a562b7e2-00-2y5jvtluzn084.pike.replit.dev"
 JWT_SECRET = "face-app-jwt-secret-key-2024"
 PORT = "8080"
-API_BASE_URL = "http://localhost:8080"
 INFERENCE_BASE_URL = "http://localhost:7860"
+VITE_API_BASE_URL = "https://8d90973b-07ef-4aee-8062-0672a562b7e2-00-2y5jvtluzn084.pike.replit.dev:8080"
 
 [workflows]
 runButton = "Project"
