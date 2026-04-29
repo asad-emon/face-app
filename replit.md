@@ -31,6 +31,20 @@ The inference service (Python/FastAPI) requires GPU/heavy dependencies and is in
 - `INFERENCE_BASE_URL` — URL of the inference service
 - `INFERENCE_CALLBACK_TOKEN` — Token for inference callbacks
 
+## File Storage
+
+Binary file payloads (face model `.safetensors`, input images, generated
+images, generated videos) are stored in **Google Drive** via a Google
+**service account** (manual credentials, not the Replit Drive integration —
+that OAuth flow was declined). MongoDB only stores Drive references
+(`drive_file_id`, `mime_type`, `size`).
+
+Required secrets:
+- `GOOGLE_SERVICE_ACCOUNT_JSON` — full JSON of the service account key
+- `GOOGLE_DRIVE_FOLDER_ID` — Drive folder ID shared with the service
+  account email (Editor access). Drive API must be enabled in the GCP
+  project.
+
 ## Database
 
 Uses MongoDB Atlas via Mongoose ODM. A `counters` collection provides
