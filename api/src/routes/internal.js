@@ -2,6 +2,8 @@ import express from "express";
 import { GeneratedVideo } from "../db.js";
 import { requireInferenceAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
+import { logApiError } from "../utils/logging.js";
+import { uploadBuffer, deleteFile } from "../services/driveStorage.js";
 
 const router = express.Router();
 
@@ -39,14 +41,38 @@ router.post(
       ? Math.max(0, Math.min(100, parsedProgress))
       : 100;
 
-    video.filename = req.body?.filename || file.originalname || video.filename;
-    video.mime_type = req.body?.mime_type || file.mimetype || "video/mp4";
+    const filename = req.body?.filename || file.originalname || video.filename;
+    const mimeType = req.body?.mime_type || file.mimetype || "video/mp4";
+
+    let driveResult;
+    try {
+      driveResult = await uploadBuffer({
+        buffer: file.buffer,
+        filename: filename || `generated-${video.id}.mp4`,
+        mimeType,
+      });
+    } catch (err) {
+      logApiError(`POST /internal/videos/${id}/content drive upload`, err);
+      return res.status(502).json({ detail: `Drive upload failed: ${err.message}` });
+    }
+
+    const previousDriveId = video.drive_file_id;
+
+    video.filename = filename;
+    video.mime_type = mimeType;
     video.processing = false;
     video.total_frames = totalFrames || 0;
     video.processed_frames = processedFrames || 0;
     video.progress_percent = progressPercent;
-    video.data = file.buffer;
+    video.drive_file_id = driveResult.drive_file_id;
+    video.size = driveResult.size;
     await video.save();
+
+    if (previousDriveId && previousDriveId !== driveResult.drive_file_id) {
+      await deleteFile(previousDriveId).catch((err) =>
+        logApiError(`POST /internal/videos/${id}/content cleanup ${previousDriveId}`, err)
+      );
+    }
 
     return res.json({ id: video.id, processing: false });
   }

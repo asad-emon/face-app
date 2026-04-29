@@ -145,7 +145,9 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
     id: modelId,
     owner_id: req.user.id,
     is_deleted: false,
-  });
+  })
+    .select({ drive_file_id: 1 })
+    .lean();
   if (!model) {
     return res.status(404).json({ detail: "Model not found" });
   }
@@ -163,7 +165,7 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
       total_frames: 0,
       processed_frames: 0,
       progress_percent: 0,
-      data: Buffer.alloc(0),
+      drive_file_id: null,
       owner_id: req.user.id,
       face_model_id: modelId,
     });
@@ -177,7 +179,7 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
 
     void triggerVideoSwap({
       generatedVideoId: generatedVideo.id,
-      model,
+      modelDriveId: model.drive_file_id,
       video,
       modelId,
       enableRestore,

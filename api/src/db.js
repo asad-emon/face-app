@@ -25,15 +25,10 @@ async function nextSequence(name) {
 }
 
 function attachAutoIncrement(schema, name) {
-  schema.pre("save", async function preSaveAutoInc(next) {
+  schema.pre("save", async function preSaveAutoInc() {
     if (this.isNew && (this.id === undefined || this.id === null)) {
-      try {
-        this.id = await nextSequence(name);
-      } catch (err) {
-        return next(err);
-      }
+      this.id = await nextSequence(name);
     }
-    return next();
   });
 }
 
@@ -55,7 +50,9 @@ const faceModelSchema = new Schema(
     version: { type: Number, required: true, default: 1 },
     is_active: { type: Boolean, required: true, default: true },
     is_deleted: { type: Boolean, required: true, default: false },
-    data: { type: Buffer, required: true },
+    drive_file_id: { type: String, required: true },
+    mime_type: { type: String, default: "application/octet-stream" },
+    size: { type: Number, default: 0 },
     owner_id: { type: Number, required: true, index: true },
   },
   { collection: "face_models", versionKey: false }
@@ -66,7 +63,9 @@ const inputImageSchema = new Schema(
   {
     id: { type: Number, unique: true, index: true },
     filename: { type: String, required: true },
-    data: { type: Buffer, required: true },
+    drive_file_id: { type: String, required: true },
+    mime_type: { type: String, default: "application/octet-stream" },
+    size: { type: Number, default: 0 },
     owner_id: { type: Number, required: true, index: true },
   },
   { collection: "input_images", versionKey: false }
@@ -76,7 +75,9 @@ attachAutoIncrement(inputImageSchema, "input_images");
 const generatedImageSchema = new Schema(
   {
     id: { type: Number, unique: true, index: true },
-    data: { type: Buffer, required: true },
+    drive_file_id: { type: String, required: true },
+    mime_type: { type: String, default: "image/jpeg" },
+    size: { type: Number, default: 0 },
     owner_id: { type: Number, required: true, index: true },
     input_image_id: { type: Number, required: true, index: true },
     face_model_id: { type: Number, required: true, index: true },
@@ -94,7 +95,8 @@ const generatedVideoSchema = new Schema(
     total_frames: { type: Number, required: true, default: 0 },
     processed_frames: { type: Number, required: true, default: 0 },
     progress_percent: { type: Number, required: true, default: 0 },
-    data: { type: Buffer, required: true, default: () => Buffer.alloc(0) },
+    drive_file_id: { type: String, default: null },
+    size: { type: Number, default: 0 },
     owner_id: { type: Number, required: true, index: true },
     face_model_id: { type: Number, required: true, default: 0, index: true },
   },

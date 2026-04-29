@@ -17,26 +17,33 @@ export function serializeFaceModel(model) {
 
 export function serializeInputImage(image, options = {}) {
   const includeData = Boolean(options.includeData);
-  return {
+  const data = options.data;
+  const payload = {
     id: image.id,
     filename: image.filename,
     owner_id: image.owner_id,
-    data: includeData && image.data ? Buffer.from(image.data).toString("base64") : undefined,
+    mime_type: image.mime_type || "application/octet-stream",
   };
+  if (includeData && data) {
+    payload.data = Buffer.from(data).toString("base64");
+  }
+  return payload;
 }
 
-export function serializeGeneratedImage(image) {
+export function serializeGeneratedImage(image, options = {}) {
+  const data = options.data;
   return {
     id: image.id,
     owner_id: image.owner_id,
-    data: image.data ? Buffer.from(image.data).toString("base64") : null,
+    data: data ? Buffer.from(data).toString("base64") : null,
+    mime_type: image.mime_type || "image/jpeg",
     input_image_id: image.input_image_id,
     face_model_id: image.face_model_id,
   };
 }
 
 export function serializeGeneratedVideo(video) {
-  const hasBinaryData = Boolean(video.data && Buffer.from(video.data).length > 0);
+  const hasContent = Boolean(video.drive_file_id);
   return {
     id: video.id,
     owner_id: video.owner_id,
@@ -47,7 +54,7 @@ export function serializeGeneratedVideo(video) {
     total_frames: Number(video.total_frames) || 0,
     processed_frames: Number(video.processed_frames) || 0,
     progress_percent: Number(video.progress_percent) || 0,
-    has_content: hasBinaryData,
+    has_content: hasContent,
   };
 }
 

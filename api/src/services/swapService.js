@@ -9,6 +9,11 @@ import {
 } from "../config.js";
 import { getErrorDetail } from "../utils/parsing.js";
 import { logApiError } from "../utils/logging.js";
+import {
+  uploadBuffer,
+  downloadBuffer,
+  deleteFile,
+} from "./driveStorage.js";
 
 const swapQueue = [];
 let swapWorkerActive = false;
@@ -30,18 +35,18 @@ function shouldRetrySwapRequest(err) {
   return false;
 }
 
-async function runSwapRemote(model, image, modelId, enableRestore) {
+async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore) {
   let response;
   for (let attempt = 0; attempt <= SWAP_MAX_RETRIES; attempt += 1) {
     const form = new FormData();
     form.append("model_id", String(modelId));
     form.append("enable_restore", enableRestore ? "1" : "0");
-    form.append("model_file", Buffer.from(model.data), {
+    form.append("model_file", modelBytes, {
       filename: "model.safetensors",
       contentType: "application/octet-stream",
     });
-    form.append("target_image", Buffer.from(image.data), {
-      filename: image.filename || "target.png",
+    form.append("target_image", imageBytes, {
+      filename: imageFilename || "target.png",
       contentType: "image/png",
     });
 
@@ -86,19 +91,51 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) 
     throw new Error("Model or image not found");
   }
 
-  const outputBytes = await runSwapRemote(model, image, modelId, enableRestore);
-  const generated = await GeneratedImage.create({
-    data: outputBytes,
-    owner_id: ownerId,
-    input_image_id: imageId,
-    face_model_id: modelId,
-  });
+  const [modelBytes, imageBytes] = await Promise.all([
+    downloadBuffer(model.drive_file_id),
+    downloadBuffer(image.drive_file_id),
+  ]);
+
+  const outputBytes = await runSwapRemote(
+    modelBytes,
+    imageBytes,
+    image.filename,
+    modelId,
+    enableRestore
+  );
+
+  let driveResult;
+  try {
+    driveResult = await uploadBuffer({
+      buffer: outputBytes,
+      filename: `swap-${ownerId}-${modelId}-${imageId}-${Date.now()}.jpg`,
+      mimeType: "image/jpeg",
+    });
+  } catch (err) {
+    throw new Error(`Drive upload failed: ${err.message}`);
+  }
+
+  let generated;
+  try {
+    generated = await GeneratedImage.create({
+      drive_file_id: driveResult.drive_file_id,
+      mime_type: driveResult.mime_type,
+      size: driveResult.size,
+      owner_id: ownerId,
+      input_image_id: imageId,
+      face_model_id: modelId,
+    });
+  } catch (err) {
+    await deleteFile(driveResult.drive_file_id).catch(() => {});
+    throw err;
+  }
+
   return { outputBytes, generatedImageId: generated.id };
 }
 
 export async function triggerVideoSwap({
   generatedVideoId,
-  model,
+  modelDriveId,
   video,
   modelId,
   enableRestore,
@@ -106,6 +143,18 @@ export async function triggerVideoSwap({
   progressUrl,
   callbackToken,
 }) {
+  let modelBytes;
+  try {
+    modelBytes = await downloadBuffer(modelDriveId);
+  } catch (err) {
+    await GeneratedVideo.updateOne(
+      { id: generatedVideoId },
+      { $set: { processing: false } }
+    );
+    logApiError("triggerVideoSwap: download model from Drive", err);
+    return;
+  }
+
   const form = new FormData();
   form.append("model_id", String(modelId));
   form.append("enable_restore", enableRestore ? "1" : "0");
@@ -118,7 +167,7 @@ export async function triggerVideoSwap({
   if (callbackToken) {
     form.append("callback_token", callbackToken);
   }
-  form.append("model_file", Buffer.from(model.data), {
+  form.append("model_file", modelBytes, {
     filename: "model.safetensors",
     contentType: "application/octet-stream",
   });

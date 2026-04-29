@@ -13,6 +13,11 @@ import {
   resolveVersion,
   setActiveModel,
 } from "../services/modelService.js";
+import {
+  uploadBuffer,
+  deleteFile,
+  deleteManyFiles,
+} from "../services/driveStorage.js";
 
 const router = express.Router();
 
@@ -41,6 +46,7 @@ router.post(
         .json({ detail: "INFERENCE_BASE_URL is not configured" });
     }
 
+    let driveResult = null;
     try {
       const form = new FormData();
       files.forEach((file) => {
@@ -75,12 +81,21 @@ router.post(
         });
       }
 
+      const modelBuffer = Buffer.from(response.data);
+      driveResult = await uploadBuffer({
+        buffer: modelBuffer,
+        filename: `${personName}-v${version}.safetensors`,
+        mimeType: "application/octet-stream",
+      });
+
       const createdModel = await FaceModel.create({
         name: `${personName} v${version}`,
         person_name: personName,
         version,
         is_active: false,
-        data: Buffer.from(response.data),
+        drive_file_id: driveResult.drive_file_id,
+        mime_type: driveResult.mime_type,
+        size: driveResult.size,
         owner_id: req.user.id,
       });
 
@@ -101,6 +116,9 @@ router.post(
 
       return res.json(serializeFaceModel(refreshed || createdModel));
     } catch (err) {
+      if (driveResult?.drive_file_id) {
+        await deleteFile(driveResult.drive_file_id).catch(() => {});
+      }
       logApiError("POST /models/generate", err);
       const detail = err.response?.data?.detail || err.message;
       return res.status(502).json({ detail: `Embedding service failed: ${detail}` });
@@ -130,6 +148,7 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
     });
   }
 
+  let driveResult = null;
   try {
     const version = await resolveVersion(
       req.user.id,
@@ -150,12 +169,20 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
       });
     }
 
+    driveResult = await uploadBuffer({
+      buffer: file.buffer,
+      filename: `${personName}-v${version}.safetensors`,
+      mimeType: file.mimetype || "application/octet-stream",
+    });
+
     const createdModel = await FaceModel.create({
       name: `${personName} v${version}`,
       person_name: personName,
       version,
       is_active: false,
-      data: file.buffer,
+      drive_file_id: driveResult.drive_file_id,
+      mime_type: driveResult.mime_type,
+      size: driveResult.size,
       owner_id: req.user.id,
     });
 
@@ -176,6 +203,9 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
 
     return res.json(serializeFaceModel(refreshed || createdModel));
   } catch (err) {
+    if (driveResult?.drive_file_id) {
+      await deleteFile(driveResult.drive_file_id).catch(() => {});
+    }
     logApiError("POST /models/upload", err);
     return res.status(500).json({ detail: "Model upload failed" });
   }
@@ -253,6 +283,12 @@ router.delete("/models/:id", requireAuth, async (req, res) => {
       await ensureActiveForPerson(req.user.id, personName);
     }
 
+    if (deletedCount > 0) {
+      await deleteFile(model.drive_file_id).catch((err) =>
+        logApiError(`DELETE /models/:id drive ${model.drive_file_id}`, err)
+      );
+    }
+
     return res.json({ deleted: deletedCount });
   } catch (err) {
     logApiError("DELETE /models/:id", err);
@@ -267,6 +303,14 @@ router.delete("/models/person/:personName", requireAuth, async (req, res) => {
   }
 
   try {
+    const toDelete = await FaceModel.find({
+      owner_id: req.user.id,
+      person_name: personName,
+      is_deleted: false,
+    })
+      .select({ drive_file_id: 1 })
+      .lean();
+
     const updateResult = await FaceModel.updateMany(
       {
         owner_id: req.user.id,
@@ -280,6 +324,8 @@ router.delete("/models/person/:personName", requireAuth, async (req, res) => {
     if (deletedCount === 0) {
       return res.status(404).json({ detail: "No models found for person" });
     }
+
+    await deleteManyFiles(toDelete.map((m) => m.drive_file_id));
 
     return res.json({ deleted: deletedCount });
   } catch (err) {
