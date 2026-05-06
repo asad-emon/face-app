@@ -1,0 +1,14 @@
+---
+deployment:
+  tasks:
+    # Define destination paths (cPanel typically uses /home/username/...)
+    - export DEPLOYPATH=/home/$(whoami)/face-app/client
+    - export APIPATH=/home/$(whoami)/face-app/api
+    
+    # 1. Deploy Frontend
+    # Copies the contents of the built dist folder to client directory on the server
+    - /bin/rsync -avz --delete client/dist/ $DEPLOYPATH
+    
+    # 2. Deploy Backend API
+    - /bin/mkdir -p $APIPATH
+    - /bin/rsync -avz --delete --exclude 'node_modules' $APIPATH
