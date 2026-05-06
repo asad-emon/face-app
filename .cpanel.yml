@@ -6,14 +6,8 @@ deployment:
     - export APIPATH=/home/$(whoami)/face-app/api
     
     # 1. Deploy Frontend
-    # Copies the contents of the built dist folder to client directory on the server
-    - cd client
-    - /bin/npm install
-    - /bin/npm run build
-    - /bin/cp -R dist/* $DEPLOYPATH
+    # Copies the contents of the client folder to client directory on the server
+    - /bin/cp -R client/* $DEPLOYPATH
     
     # 2. Deploy Backend API
-    - cd ../api
-    - /bin/cp -R src $APIPATH
-    - /bin/cp package.json $APIPATH
-    - /bin/cp package-lock.json $APIPATH
+    - /bin/cp -R api/* $APIPATH
