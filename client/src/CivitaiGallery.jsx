@@ -22,6 +22,7 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  Textarea,
 } from '@chakra-ui/react';
 import {
   AddIcon,
@@ -78,6 +79,13 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
   const [period, setPeriod] = useState(localStorage.getItem('civitai_period') || 'AllTime');
   const [modelId, setModelId] = useState(localStorage.getItem('civitai_favorite_model_id') || '');
   const [modelVersionId, setModelVersionId] = useState('');
+  const [postId, setPostId] = useState('');
+  const [followedCreatorsText, setFollowedCreatorsText] = useState(
+    localStorage.getItem('civitai_followed_creators') || ''
+  );
+  const [selectedFollowedCreator, setSelectedFollowedCreator] = useState(
+    localStorage.getItem('civitai_followed_creator') || ''
+  );
   const pollRef = useRef(null);
 
   const params = useMemo(() => {
@@ -90,8 +98,9 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
     if (period) search.set('period', period);
     if (modelId.trim()) search.set('modelId', modelId.trim());
     if (modelVersionId.trim()) search.set('modelVersionId', modelVersionId.trim());
+    if (postId.trim()) search.set('postId', postId.trim());
     return search;
-  }, [limit, page, username, nsfw, sort, period, modelId, modelVersionId]);
+  }, [limit, page, username, nsfw, sort, period, modelId, modelVersionId, postId]);
 
   const fetchImages = async () => {
     setBusy(true);
@@ -296,6 +305,14 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
     const creator = model.creator?.username ? `by ${model.creator.username}` : '';
     return [name, `#${model.id}`, creator].filter(Boolean).join(' ');
   };
+
+  const followedCreators = useMemo(() => {
+    const items = followedCreatorsText
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return Array.from(new Set(items));
+  }, [followedCreatorsText]);
 
   const paginationControls = (
     <HStack justify="space-between" align="center" flexWrap="wrap">
@@ -515,15 +532,17 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
                 value={username}
                 onChange={(event) => {
                   localStorage.setItem('civitai_username', event.target.value);
+                  localStorage.setItem('civitai_followed_creator', '');
+                  setSelectedFollowedCreator('');
                   setPage(1);
                   setUsername(event.target.value);
                 }}
               />
             </Box>
-          <Box>
-            <Text fontSize="sm" color="gray.500" mb={1}>
-              Favorite models
-            </Text>
+            <Box>
+              <Text fontSize="sm" color="gray.500" mb={1}>
+                Favorite models
+              </Text>
             {favoriteModelsBusy ? (
               <Text color="gray.500">Loading favorites...</Text>
             ) : (
@@ -569,6 +588,50 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
                 <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
                   <Box>
                     <Text fontSize="sm" color="gray.500" mb={1}>
+                      Followed creators
+                    </Text>
+                    <Select
+                      value={selectedFollowedCreator}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        localStorage.setItem('civitai_followed_creator', next);
+                        localStorage.setItem('civitai_username', next);
+                        setSelectedFollowedCreator(next);
+                        setUsername(next);
+                        setPage(1);
+                      }}
+                      isDisabled={followedCreators.length === 0}
+                    >
+                      <option value="">All creators</option>
+                      {followedCreators.map((creator) => (
+                        <option key={creator} value={creator}>
+                          {creator}
+                        </option>
+                      ))}
+                    </Select>
+                    {followedCreators.length === 0 && (
+                      <Text fontSize="xs" color="gray.500" mt={1}>
+                        Add usernames below to enable this filter.
+                      </Text>
+                    )}
+                  </Box>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500" mb={1}>
+                      Followed list (comma-separated)
+                    </Text>
+                    <Textarea
+                      placeholder="creator1, creator2, creator3"
+                      value={followedCreatorsText}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        localStorage.setItem('civitai_followed_creators', next);
+                        setFollowedCreatorsText(next);
+                      }}
+                      minH="84px"
+                    />
+                  </Box>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500" mb={1}>
                       Model Version ID
                     </Text>
                     <Input
@@ -577,6 +640,19 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
                       onChange={(event) => {
                         setPage(1);
                         setModelVersionId(event.target.value);
+                      }}
+                    />
+                  </Box>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500" mb={1}>
+                      Post ID
+                    </Text>
+                    <Input
+                      placeholder="Filter by postId"
+                      value={postId}
+                      onChange={(event) => {
+                        setPage(1);
+                        setPostId(event.target.value);
                       }}
                     />
                   </Box>
