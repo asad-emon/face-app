@@ -7,7 +7,10 @@ deployment:
     
     # 1. Deploy Frontend
     # Copies the contents of the built dist folder to client directory on the server
-    - rsync -avz --delete client/dist/ $DEPLOYPATH
+    - /bin/cp -R client/dist/assets $DEPLOYPATH
+    - /bin/cp client/dist/index.html $DEPLOYPATH
     
     # 2. Deploy Backend API
-    - rsync -avz --delete --exclude 'node_modules' api/ $APIPATH
+    - /bin/cp -R api/src $APIPATH
+    - /bin/cp api/package.json $APIPATH
+    - /bin/cp api/package-lock.json $APIPATH
