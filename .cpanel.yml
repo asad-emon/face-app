@@ -7,10 +7,13 @@ deployment:
     
     # 1. Deploy Frontend
     # Copies the contents of the built dist folder to client directory on the server
-    - /bin/cp -R client/dist/assets $DEPLOYPATH
-    - /bin/cp client/dist/index.html $DEPLOYPATH
+    - cd client
+    - /bin/npm install
+    - /bin/npm run build
+    - /bin/cp -R dist/* $DEPLOYPATH
     
     # 2. Deploy Backend API
-    - /bin/cp -R api/src $APIPATH
-    - /bin/cp api/package.json $APIPATH
-    - /bin/cp api/package-lock.json $APIPATH
+    - cd ../api
+    - /bin/cp -R src $APIPATH
+    - /bin/cp package.json $APIPATH
+    - /bin/cp package-lock.json $APIPATH
