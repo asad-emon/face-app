@@ -7,7 +7,11 @@ deployment:
     
     # 1. Deploy Frontend
     # Copies the contents of the client folder to client directory on the server
-    - /bin/cp -R client/* $DEPLOYPATH
+    - /bin/cp -R client/src $DEPLOYPATH
+    - /bin/cp client/package.json $DEPLOYPATH
+    - /bin/cp client/package-lock.json $DEPLOYPATH
     
     # 2. Deploy Backend API
-    - /bin/cp -R api/* $APIPATH
+    - /bin/cp -R api/src $APIPATH
+    - /bin/cp api/package.json $APIPATH
+    - /bin/cp api/package-lock.json $APIPATH
