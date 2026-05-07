@@ -86,6 +86,7 @@ router.post(
         buffer: modelBuffer,
         filename: `${personName}-v${version}.safetensors`,
         mimeType: "application/octet-stream",
+        authUser: req.user,
       });
 
       const createdModel = await FaceModel.create({
@@ -117,7 +118,7 @@ router.post(
       return res.json(serializeFaceModel(refreshed || createdModel));
     } catch (err) {
       if (driveResult?.drive_file_id) {
-        await deleteFile(driveResult.drive_file_id).catch(() => {});
+        await deleteFile(driveResult.drive_file_id, req.user).catch(() => {});
       }
       logApiError("POST /models/generate", err);
       const detail = err.response?.data?.detail || err.message;
@@ -173,6 +174,7 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
       buffer: file.buffer,
       filename: `${personName}-v${version}.safetensors`,
       mimeType: file.mimetype || "application/octet-stream",
+      authUser: req.user,
     });
 
     const createdModel = await FaceModel.create({
@@ -204,7 +206,7 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
     return res.json(serializeFaceModel(refreshed || createdModel));
   } catch (err) {
     if (driveResult?.drive_file_id) {
-      await deleteFile(driveResult.drive_file_id).catch(() => {});
+      await deleteFile(driveResult.drive_file_id, req.user).catch(() => {});
     }
     logApiError("POST /models/upload", err);
     return res.status(500).json({ detail: "Model upload failed" });
@@ -284,7 +286,7 @@ router.delete("/models/:id", requireAuth, async (req, res) => {
     }
 
     if (deletedCount > 0) {
-      await deleteFile(model.drive_file_id).catch((err) =>
+      await deleteFile(model.drive_file_id, req.user).catch((err) =>
         logApiError(`DELETE /models/:id drive ${model.drive_file_id}`, err)
       );
     }
@@ -325,7 +327,7 @@ router.delete("/models/person/:personName", requireAuth, async (req, res) => {
       return res.status(404).json({ detail: "No models found for person" });
     }
 
-    await deleteManyFiles(toDelete.map((m) => m.drive_file_id));
+    await deleteManyFiles(toDelete.map((m) => m.drive_file_id), req.user);
 
     return res.json({ deleted: deletedCount });
   } catch (err) {

@@ -1,6 +1,6 @@
 import axios from "axios";
 import FormData from "form-data";
-import { FaceModel, GeneratedImage, InputImage, SwapJob, GeneratedVideo } from "../db.js";
+import { FaceModel, GeneratedImage, InputImage, SwapJob, GeneratedVideo, User } from "../db.js";
 import {
   INFERENCE_BASE_URL,
   SWAP_MAX_RETRIES,
@@ -78,6 +78,10 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
 }
 
 export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) {
+  const owner = await User.findOne({ id: ownerId });
+  if (!owner) {
+    throw new Error("Owner not found");
+  }
   const model = await FaceModel.findOne({
     id: modelId,
     owner_id: ownerId,
@@ -92,8 +96,8 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) 
   }
 
   const [modelBytes, imageBytes] = await Promise.all([
-    downloadBuffer(model.drive_file_id),
-    downloadBuffer(image.drive_file_id),
+    downloadBuffer(model.drive_file_id, owner),
+    downloadBuffer(image.drive_file_id, owner),
   ]);
 
   const outputBytes = await runSwapRemote(
@@ -110,6 +114,7 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) 
       buffer: outputBytes,
       filename: `swap-${ownerId}-${modelId}-${imageId}-${Date.now()}.jpg`,
       mimeType: "image/jpeg",
+      authUser: owner,
     });
   } catch (err) {
     throw new Error(`Drive upload failed: ${err.message}`);
@@ -126,7 +131,7 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) 
       face_model_id: modelId,
     });
   } catch (err) {
-    await deleteFile(driveResult.drive_file_id).catch(() => {});
+    await deleteFile(driveResult.drive_file_id, owner).catch(() => {});
     throw err;
   }
 
@@ -135,6 +140,7 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) 
 
 export async function triggerVideoSwap({
   generatedVideoId,
+  ownerId,
   modelDriveId,
   video,
   modelId,
@@ -145,7 +151,11 @@ export async function triggerVideoSwap({
 }) {
   let modelBytes;
   try {
-    modelBytes = await downloadBuffer(modelDriveId);
+    const owner = await User.findOne({ id: ownerId });
+    if (!owner) {
+      throw new Error("Owner not found");
+    }
+    modelBytes = await downloadBuffer(modelDriveId, owner);
   } catch (err) {
     await GeneratedVideo.updateOne(
       { id: generatedVideoId },

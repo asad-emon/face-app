@@ -84,7 +84,7 @@ router.get("/videos/generated/:id/content", requireAuth, async (req, res) => {
 
   try {
     if (!range) {
-      const fullBuffer = await downloadBuffer(video.drive_file_id);
+      const fullBuffer = await downloadBuffer(video.drive_file_id, req.user);
       res.setHeader("Content-Length", String(fullBuffer.length));
       return res.send(fullBuffer);
     }
@@ -111,7 +111,7 @@ router.get("/videos/generated/:id/content", requireAuth, async (req, res) => {
       return res.status(416).end();
     }
 
-    const chunk = await downloadRange(video.drive_file_id, start, end);
+    const chunk = await downloadRange(video.drive_file_id, start, end, req.user);
     const chunkEnd = start + chunk.length - 1;
     const totalForHeader = total > 0 ? total : chunkEnd + 1;
     res.status(206);
@@ -141,7 +141,7 @@ router.delete("/videos/generated/:id", requireAuth, async (req, res) => {
   }
 
   if (existing.drive_file_id) {
-    await deleteFile(existing.drive_file_id).catch((err) =>
+    await deleteFile(existing.drive_file_id, req.user).catch((err) =>
       logApiError(`DELETE /videos/generated/:id drive ${existing.drive_file_id}`, err)
     );
   }
@@ -173,7 +173,7 @@ router.delete("/videos/generated", requireAuth, async (req, res) => {
     id: { $in: uniqueIds },
   });
 
-  await deleteManyFiles(existing.map((v) => v.drive_file_id));
+  await deleteManyFiles(existing.map((v) => v.drive_file_id), req.user);
 
   return res.json({ deleted: result.deletedCount || 0 });
 });

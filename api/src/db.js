@@ -36,7 +36,11 @@ const userSchema = new Schema(
   {
     id: { type: Number, unique: true, index: true },
     email: { type: String, required: true, unique: true },
-    hashed_password: { type: String, required: true },
+    hashed_password: { type: String, default: null },
+    google_id: { type: String, unique: true, sparse: true, index: true },
+    google_refresh_token: { type: String, default: null },
+    google_name: { type: String, default: "" },
+    google_picture: { type: String, default: "" },
   },
   { collection: "users", versionKey: false }
 );

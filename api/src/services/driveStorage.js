@@ -1,17 +1,19 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
+import {
+  GOOGLE_OAUTH_CLIENT_ID,
+  GOOGLE_OAUTH_CLIENT_SECRET,
+} from "../config.js";
 
 const SCOPES = ["https://www.googleapis.com/auth/drive"];
 
-let driveClientPromise = null;
-
 function getOAuthConfig() {
-  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const clientId = GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = GOOGLE_OAUTH_CLIENT_SECRET;
   const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
-  if (!clientId || !clientSecret || !refreshToken) {
+  if (!clientId || !clientSecret) {
     throw new Error(
-      "Google OAuth not configured: GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REFRESH_TOKEN are required"
+      "Google OAuth not configured: GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET are required"
     );
   }
   return { clientId, clientSecret, refreshToken };
@@ -25,19 +27,26 @@ function getFolderId() {
   return folderId;
 }
 
-async function getDriveClient() {
-  if (!driveClientPromise) {
-    driveClientPromise = (async () => {
-      const { clientId, clientSecret, refreshToken } = getOAuthConfig();
-      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
-      oauth2Client.setCredentials({ refresh_token: refreshToken, scope: SCOPES.join(" ") });
-      return google.drive({ version: "v3", auth: oauth2Client });
-    })().catch((err) => {
-      driveClientPromise = null;
-      throw err;
-    });
+function getRefreshToken(authUser) {
+  const { refreshToken } = getOAuthConfig();
+  const userRefreshToken = authUser?.google_refresh_token;
+  if (userRefreshToken) {
+    return userRefreshToken;
   }
-  return driveClientPromise;
+  if (refreshToken) {
+    return refreshToken;
+  }
+  throw new Error("Google Drive is not connected for this user");
+}
+
+async function getDriveClient(authUser) {
+  const { clientId, clientSecret } = getOAuthConfig();
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+  oauth2Client.setCredentials({
+    refresh_token: getRefreshToken(authUser),
+    scope: SCOPES.join(" "),
+  });
+  return google.drive({ version: "v3", auth: oauth2Client });
 }
 
 function bufferToStream(buffer) {
@@ -47,8 +56,8 @@ function bufferToStream(buffer) {
   return stream;
 }
 
-export async function uploadBuffer({ buffer, filename, mimeType }) {
-  const drive = await getDriveClient();
+export async function uploadBuffer({ buffer, filename, mimeType, authUser }) {
+  const drive = await getDriveClient(authUser);
   const folderId = getFolderId();
   const safeName = (filename || `upload-${Date.now()}`).slice(0, 200);
   const safeMime = mimeType || "application/octet-stream";
@@ -75,11 +84,11 @@ export async function uploadBuffer({ buffer, filename, mimeType }) {
   };
 }
 
-export async function downloadBuffer(driveFileId) {
+export async function downloadBuffer(driveFileId, authUser) {
   if (!driveFileId) {
     throw new Error("driveFileId is required");
   }
-  const drive = await getDriveClient();
+  const drive = await getDriveClient(authUser);
   const response = await drive.files.get(
     {
       fileId: driveFileId,
@@ -91,11 +100,11 @@ export async function downloadBuffer(driveFileId) {
   return Buffer.from(response.data);
 }
 
-export async function downloadRange(driveFileId, start, end) {
+export async function downloadRange(driveFileId, start, end, authUser) {
   if (!driveFileId) {
     throw new Error("driveFileId is required");
   }
-  const drive = await getDriveClient();
+  const drive = await getDriveClient(authUser);
   const headers = {};
   if (Number.isInteger(start) || Number.isInteger(end)) {
     const startStr = Number.isInteger(start) ? String(start) : "0";
@@ -113,11 +122,11 @@ export async function downloadRange(driveFileId, start, end) {
   return Buffer.from(response.data);
 }
 
-export async function getFileMetadata(driveFileId) {
+export async function getFileMetadata(driveFileId, authUser) {
   if (!driveFileId) {
     throw new Error("driveFileId is required");
   }
-  const drive = await getDriveClient();
+  const drive = await getDriveClient(authUser);
   const response = await drive.files.get({
     fileId: driveFileId,
     fields: "id, name, mimeType, size",
@@ -131,12 +140,12 @@ export async function getFileMetadata(driveFileId) {
   };
 }
 
-export async function deleteFile(driveFileId) {
+export async function deleteFile(driveFileId, authUser) {
   if (!driveFileId) {
     return;
   }
   try {
-    const drive = await getDriveClient();
+    const drive = await getDriveClient(authUser);
     await drive.files.delete({
       fileId: driveFileId,
       supportsAllDrives: true,
@@ -150,14 +159,14 @@ export async function deleteFile(driveFileId) {
   }
 }
 
-export async function deleteManyFiles(driveFileIds) {
+export async function deleteManyFiles(driveFileIds, authUser) {
   const ids = (driveFileIds || []).filter(Boolean);
   if (ids.length === 0) {
     return;
   }
   await Promise.all(
     ids.map((id) =>
-      deleteFile(id).catch((err) => {
+      deleteFile(id, authUser).catch((err) => {
         console.warn(`[WARN] Failed to delete Drive file ${id}: ${err?.message || err}`);
       })
     )

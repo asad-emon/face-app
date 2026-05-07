@@ -27,6 +27,7 @@ router.post("/images", requireAuth, upload.single("file"), async (req, res) => {
       buffer: req.file.buffer,
       filename,
       mimeType: req.file.mimetype || "application/octet-stream",
+      authUser: req.user,
     });
     const image = await InputImage.create({
       filename,
@@ -69,7 +70,7 @@ router.get("/images", requireAuth, async (req, res) => {
       rows.map(async (row) => {
         if (!row.drive_file_id) return [row.id, null];
         try {
-          const buffer = await downloadBuffer(row.drive_file_id);
+          const buffer = await downloadBuffer(row.drive_file_id, req.user);
           return [row.id, buffer];
         } catch (err) {
           logApiError(`GET /images download ${row.drive_file_id}`, err);
@@ -127,7 +128,7 @@ router.delete("/images/:id(\\d+)", requireAuth, async (req, res) => {
   await deleteManyFiles([
     inputImage.drive_file_id,
     ...generatedToDelete.map((g) => g.drive_file_id),
-  ]);
+  ], req.user);
 
   return res.json({
     deleted_input: inputDeleteResult.deletedCount || 0,
@@ -182,7 +183,7 @@ router.delete("/images", requireAuth, async (req, res) => {
   await deleteManyFiles([
     ...existingInputImages.map((i) => i.drive_file_id),
     ...generatedToDelete.map((g) => g.drive_file_id),
-  ]);
+  ], req.user);
 
   return res.json({
     deleted_input: inputDeleteResult.deletedCount || 0,
@@ -209,7 +210,7 @@ router.get("/images/generated", requireAuth, async (req, res) => {
     rows.map(async (row) => {
       if (!row.drive_file_id) return [row.id, null];
       try {
-        const buffer = await downloadBuffer(row.drive_file_id);
+        const buffer = await downloadBuffer(row.drive_file_id, req.user);
         return [row.id, buffer];
       } catch (err) {
         logApiError(`GET /images/generated download ${row.drive_file_id}`, err);
@@ -243,7 +244,7 @@ router.get("/images/generated/:id(\\d+)", requireAuth, async (req, res) => {
   let data = null;
   if (image.drive_file_id) {
     try {
-      data = await downloadBuffer(image.drive_file_id);
+      data = await downloadBuffer(image.drive_file_id, req.user);
     } catch (err) {
       logApiError(`GET /images/generated/:id download ${image.drive_file_id}`, err);
     }
@@ -268,7 +269,7 @@ router.delete("/images/generated/:id(\\d+)", requireAuth, async (req, res) => {
     return res.status(404).json({ detail: "Image not found" });
   }
 
-  await deleteFile(existing.drive_file_id).catch((err) =>
+  await deleteFile(existing.drive_file_id, req.user).catch((err) =>
     logApiError(`DELETE /images/generated/:id drive ${existing.drive_file_id}`, err)
   );
 
@@ -299,7 +300,7 @@ router.delete("/images/generated", requireAuth, async (req, res) => {
     id: { $in: uniqueIds },
   });
 
-  await deleteManyFiles(existing.map((g) => g.drive_file_id));
+  await deleteManyFiles(existing.map((g) => g.drive_file_id), req.user);
 
   return res.json({ deleted: result.deletedCount || 0 });
 });

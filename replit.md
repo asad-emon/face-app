@@ -28,6 +28,7 @@ The inference service (Python/FastAPI) requires GPU/heavy dependencies and is in
 - `JWT_SECRET` — Secret for JSON web tokens
 - `PORT` — API port (8080)
 - `API_BASE_URL` — Base URL of the API
+- `CLIENT_AUTH_REDIRECT_URL` — Frontend URL that receives Google OAuth sign-in results
 - `INFERENCE_BASE_URL` — URL of the inference service
 - `INFERENCE_CALLBACK_TOKEN` — Token for inference callbacks
 
@@ -43,6 +44,8 @@ Drive due to no storage quota). MongoDB only stores Drive references
 Required secrets:
 - `GOOGLE_OAUTH_CLIENT_ID` — OAuth 2.0 client ID from GCP
 - `GOOGLE_OAUTH_CLIENT_SECRET` — OAuth 2.0 client secret
+- `GOOGLE_OAUTH_REDIRECT_URI` — API callback URL registered in Google Console
+  (for example, `https://api.example.com/auth/google/callback`)
 - `GOOGLE_OAUTH_REFRESH_TOKEN` — long-lived refresh token with
   `https://www.googleapis.com/auth/drive` scope (typically generated
   via Google OAuth Playground)

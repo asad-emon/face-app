@@ -179,6 +179,7 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
 
     void triggerVideoSwap({
       generatedVideoId: generatedVideo.id,
+      ownerId: req.user.id,
       modelDriveId: model.drive_file_id,
       video,
       modelId,

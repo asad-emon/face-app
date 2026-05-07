@@ -1,5 +1,5 @@
 import express from "express";
-import { GeneratedVideo } from "../db.js";
+import { GeneratedVideo, User } from "../db.js";
 import { requireInferenceAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
@@ -24,6 +24,10 @@ router.post(
     const video = await GeneratedVideo.findOne({ id });
     if (!video) {
       return res.status(404).json({ detail: "Video not found" });
+    }
+    const owner = await User.findOne({ id: video.owner_id });
+    if (!owner) {
+      return res.status(404).json({ detail: "Video owner not found" });
     }
 
     const parsedTotal = Number(req.body?.total_frames);
@@ -50,6 +54,7 @@ router.post(
         buffer: file.buffer,
         filename: filename || `generated-${video.id}.mp4`,
         mimeType,
+        authUser: owner,
       });
     } catch (err) {
       logApiError(`POST /internal/videos/${id}/content drive upload`, err);
@@ -69,7 +74,7 @@ router.post(
     await video.save();
 
     if (previousDriveId && previousDriveId !== driveResult.drive_file_id) {
-      await deleteFile(previousDriveId).catch((err) =>
+      await deleteFile(previousDriveId, owner).catch((err) =>
         logApiError(`POST /internal/videos/${id}/content cleanup ${previousDriveId}`, err)
       );
     }

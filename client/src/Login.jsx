@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Alert, AlertIcon, Box, Button, Heading, Input, Stack, Text } from '@chakra-ui/react';
+import { Alert, AlertIcon, Box, Button, Divider, Heading, Input, Stack, Text } from '@chakra-ui/react';
 import { apiBaseUrl } from './utils';
 import { useApp } from './contexts/AppContext.jsx';
 
 export default function Login() {
-  const { setToken } = useApp();
+  const { setToken, authError, setAuthError } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
@@ -13,6 +13,7 @@ export default function Login() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    setAuthError('');
     try {
       const response = await fetch(`${apiBaseUrl}/token`, {
         method: 'POST',
@@ -36,6 +37,7 @@ export default function Login() {
   const handleRegister = async (e) => {
     e.preventDefault();
     setError('');
+    setAuthError('');
     try {
       const response = await fetch(`${apiBaseUrl}/users`, {
         method: 'POST',
@@ -50,6 +52,12 @@ export default function Login() {
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const handleGoogleSignIn = () => {
+    setError('');
+    setAuthError('');
+    window.location.href = `${apiBaseUrl}/auth/google/start`;
   };
 
   return (
@@ -80,10 +88,14 @@ export default function Login() {
               <Button type="submit">
                 {isRegistering ? 'Register' : 'Login'}
               </Button>
-              {error && (
+              <Divider />
+              <Button type="button" variant="outline" onClick={handleGoogleSignIn}>
+                Continue with Google
+              </Button>
+              {(error || authError) && (
                 <Alert status="error" borderRadius="8px">
                   <AlertIcon />
-                  {error}
+                  {error || authError}
                 </Alert>
               )}
             </Stack>
