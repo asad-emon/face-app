@@ -54,6 +54,8 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [previewId, setPreviewId] = useState(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [autoSelectPosition, setAutoSelectPosition] = useState(null); // 'first', 'last', or null
   const [zoomLevel, setZoomLevel] = useState(1);
   const [inferenceBusy, setInferenceBusy] = useState(false);
   const [inferenceMessage, setInferenceMessage] = useState('');
@@ -338,31 +340,63 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
 
   const showPrevious = () => {
     if (items.length === 0 || previewIndex < 0) return;
-    const nextIndex = (previewIndex - 1 + items.length) % items.length;
-    setPreviewId(items[nextIndex].id);
+    if (previewIndex === 0) {
+      if (page > 1) {
+        setPage((prev) => prev - 1);
+        setAutoSelectPosition('last');
+      }
+    } else {
+      setPreviewId(items[previewIndex - 1].id);
+    }
     setZoomLevel(1);
   };
 
   const showNext = () => {
     if (items.length === 0 || previewIndex < 0) return;
-    const nextIndex = (previewIndex + 1) % items.length;
-    setPreviewId(items[nextIndex].id);
+    if (previewIndex === items.length - 1) {
+      const pages = toNumber(metadata?.totalPages, 1);
+      if (page < pages) {
+        setPage((prev) => prev + 1);
+        setAutoSelectPosition('first');
+      }
+    } else {
+      setPreviewId(items[previewIndex + 1].id);
+    }
     setZoomLevel(1);
   };
 
   useEffect(() => {
-    if (!preview) return undefined;
+    if (!isPreviewOpen) return undefined;
     const onKeyDown = (event) => {
       if (event.key === 'ArrowLeft') showPrevious();
       else if (event.key === 'ArrowRight') showNext();
       else if (event.key === 'Escape') {
         setPreviewId(null);
+        setIsPreviewOpen(false);
         setZoomLevel(1);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [preview, previewIndex, items]);
+  }, [isPreviewOpen, previewIndex, items]);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+
+    if (autoSelectPosition) {
+      if (autoSelectPosition === 'first') {
+        setPreviewId(items[0].id);
+      } else if (autoSelectPosition === 'last') {
+        setPreviewId(items[items.length - 1].id);
+      }
+      setAutoSelectPosition(null);
+    } else if (isPreviewOpen) {
+      const exists = items.some((item) => item.id === previewId);
+      if (!exists) {
+        setPreviewId(items[0].id);
+      }
+    }
+  }, [items, autoSelectPosition, isPreviewOpen, previewId]);
 
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(3, Math.round((prev + 0.25) * 100) / 100));
   const handleZoomOut = () => setZoomLevel((prev) => Math.max(1, Math.round((prev - 0.25) * 100) / 100));
@@ -799,6 +833,7 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
                   cursor="pointer"
                   onClick={() => {
                     setPreviewId(image.id);
+                    setIsPreviewOpen(true);
                     setZoomLevel(1);
                   }}
                 />
@@ -826,9 +861,10 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
       </Stack>
 
       <Modal
-        isOpen={Boolean(preview)}
+        isOpen={isPreviewOpen}
         onClose={() => {
           setPreviewId(null);
+          setIsPreviewOpen(false);
           setZoomLevel(1);
         }}
         size="6xl"
@@ -837,7 +873,7 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
         <ModalContent bg="#0b0f1a">
           <ModalCloseButton />
           <ModalBody py={6}>
-            {preview && (
+            {preview ? (
               <Stack spacing={4} align="center">
                 <Image
                   src={preview.url}
@@ -854,12 +890,17 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
                     aria-label="Previous image"
                     icon={<ArrowLeftIcon />}
                     onClick={showPrevious}
+                    isDisabled={page <= 1 && previewIndex === 0}
                   />
                   <IconButton
                     variant="outline"
                     aria-label="Next image"
                     icon={<ArrowRightIcon />}
                     onClick={showNext}
+                    isDisabled={
+                      page >= toNumber(metadata?.totalPages, 1) &&
+                      previewIndex === items.length - 1
+                    }
                   />
                 </HStack>
                 <HStack spacing={2}>
@@ -904,6 +945,10 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
                   </Text>
                 )}
               </Stack>
+            ) : (
+              <Box display="flex" justifyContent="center" alignItems="center" minH="400px">
+                <Text color="gray.500">{busy ? 'Loading...' : 'No images found'}</Text>
+              </Box>
             )}
           </ModalBody>
         </ModalContent>

@@ -18,3 +18,5 @@ __pycache__/
 
 inference/models/
 .vscode/
+docker-compose.override.yml
+.replit

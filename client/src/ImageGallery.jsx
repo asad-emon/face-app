@@ -56,10 +56,12 @@ export default function ImageGallery({ isActive = false }) {
   const [videoPageSize, setVideoPageSize] = useState(VIDEO_PAGE_SIZE);
   const [previewId, setPreviewId] = useState(null);
   const [forcedPreview, setForcedPreview] = useState(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [videoSources, setVideoSources] = useState({});
   const [loadingVideoIds, setLoadingVideoIds] = useState([]);
   const [statusLoadingIds, setStatusLoadingIds] = useState([]);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [autoSelectPosition, setAutoSelectPosition] = useState(null); // 'first', 'last', or null
   const videoSourcesRef = useRef({});
 
   const fetchGallery = async (options = {}) => {
@@ -161,12 +163,19 @@ export default function ImageGallery({ isActive = false }) {
       setSelectedImageIds((prev) => prev.filter((id) => !deleted.has(id)));
       if (previewId !== null && deleted.has(previewId)) {
         setPreviewId(null);
+        setIsPreviewOpen(false);
       }
       const nextTotal = Math.max(0, imageTotal - deletedCount);
       const totalPages = Math.max(1, Math.ceil(nextTotal / imagePageSize));
       const nextPage = Math.min(imagePage, totalPages);
-      setImagePage(nextPage);
-      await fetchGallery({ imagePage: nextPage });
+      if (nextPage !== imagePage) {
+        setImagePage(nextPage); // This will trigger fetchGallery via useEffect
+        setAutoSelectPosition('first'); // When page changes due to deletion, select first image of new page
+      } else {
+        // If page didn't change, but images were deleted, we need to re-fetch to update the list
+        // and potentially trigger auto-selection if previewId became null.
+        fetchGallery(); // Explicitly re-fetch for the current page
+      }
     } catch (error) {
       console.error('Failed to delete images:', error);
       alert('Error: ' + error.message);
@@ -203,13 +212,20 @@ export default function ImageGallery({ isActive = false }) {
       setSelectedImageIds((prev) => prev.filter((id) => !removedIds.has(id)));
       if (previewId !== null && removedIds.has(previewId)) {
         setPreviewId(null);
+        setIsPreviewOpen(false);
       }
 
       const nextTotal = Math.max(0, imageTotal - deletedGenerated);
       const totalPages = Math.max(1, Math.ceil(nextTotal / imagePageSize));
       const nextPage = Math.min(imagePage, totalPages);
-      setImagePage(nextPage);
-      await fetchGallery({ imagePage: nextPage });
+      if (nextPage !== imagePage) {
+        setImagePage(nextPage); // This will trigger fetchGallery via useEffect
+        setAutoSelectPosition('first'); // When page changes due to deletion, select first image of new page
+      } else {
+        // If page didn't change, but images were deleted, we need to re-fetch to update the list
+        // and potentially trigger auto-selection if previewId became null.
+        fetchGallery(); // Explicitly re-fetch for the current page
+      }
       if (deletedInput > 0) {
         alert('Deleted source image and its generated results.');
       }
@@ -350,15 +366,28 @@ export default function ImageGallery({ isActive = false }) {
 
   const showPrevious = () => {
     if (images.length === 0 || previewIndex < 0) return;
-    const nextIndex = (previewIndex - 1 + images.length) % images.length;
-    setPreviewId(images[nextIndex].id);
+    if (previewIndex === 0) {
+      if (imagePage > 1) {
+        setImagePage((prev) => prev - 1);
+        setAutoSelectPosition('last');
+      }
+    } else {
+      setPreviewId(images[previewIndex - 1].id);
+    }
     setZoomLevel(1);
   };
 
   const showNext = () => {
     if (images.length === 0 || previewIndex < 0) return;
-    const nextIndex = (previewIndex + 1) % images.length;
-    setPreviewId(images[nextIndex].id);
+    if (previewIndex === images.length - 1) {
+      const totalPages = Math.max(1, Math.ceil(imageTotal / imagePageSize));
+      if (imagePage < totalPages) {
+        setImagePage((prev) => prev + 1);
+        setAutoSelectPosition('first');
+      }
+    } else {
+      setPreviewId(images[previewIndex + 1].id);
+    }
     setZoomLevel(1);
   };
 
@@ -366,6 +395,7 @@ export default function ImageGallery({ isActive = false }) {
     if (!imageId) return;
     setPreviewId(imageId);
     setZoomLevel(1);
+    setIsPreviewOpen(true);
   };
 
   useEffect(() => {
@@ -375,19 +405,20 @@ export default function ImageGallery({ isActive = false }) {
   }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize]);
 
   useEffect(() => {
-    if (!activePreview) return undefined;
+    if (!isPreviewOpen) return undefined;
     const onKeyDown = (event) => {
       if (!isForcedPreview && event.key === 'ArrowLeft') showPrevious();
       else if (!isForcedPreview && event.key === 'ArrowRight') showNext();
       else if (event.key === 'Escape') {
         setPreviewId(null);
         setForcedPreview(null);
+        setIsPreviewOpen(false);
         setZoomLevel(1);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activePreview, isForcedPreview, previewIndex, images]);
+  }, [isPreviewOpen, isForcedPreview, previewIndex, images]);
 
   useEffect(() => {
     const handler = async (event) => {
@@ -404,6 +435,7 @@ export default function ImageGallery({ isActive = false }) {
         if (payload?.id) {
           setForcedPreview(payload);
           setPreviewId(payload.id);
+          setIsPreviewOpen(true);
           setZoomLevel(1);
         }
       } catch (_err) {
@@ -413,6 +445,26 @@ export default function ImageGallery({ isActive = false }) {
     window.addEventListener('gallery:open', handler);
     return () => window.removeEventListener('gallery:open', handler);
   }, [token]);
+
+  // Effect for auto-selection after page change or deletion
+  useEffect(() => {
+    if (images.length === 0) return;
+
+    if (autoSelectPosition) {
+      if (autoSelectPosition === 'first') {
+        setPreviewId(images[0].id);
+      } else if (autoSelectPosition === 'last') {
+        setPreviewId(images[images.length - 1].id);
+      }
+      setAutoSelectPosition(null); // Reset the flag after selection
+    } else if (isPreviewOpen && !forcedPreview) {
+      // If modal is open, ensure previewId is valid for the current page
+      const exists = images.some((img) => img.id === previewId);
+      if (!exists) {
+        setPreviewId(images[0].id);
+      }
+    }
+  }, [images, autoSelectPosition, previewId, isPreviewOpen, forcedPreview]);
 
   useEffect(() => {
     videoSourcesRef.current = videoSources;
@@ -738,10 +790,11 @@ export default function ImageGallery({ isActive = false }) {
       </Stack>
 
       <Modal
-        isOpen={Boolean(activePreview)}
+        isOpen={isPreviewOpen}
         onClose={() => {
           setPreviewId(null);
           setForcedPreview(null);
+          setIsPreviewOpen(false);
           setZoomLevel(1);
         }}
         size="6xl"
@@ -750,7 +803,7 @@ export default function ImageGallery({ isActive = false }) {
         <ModalContent bg="#0b0f1a">
           <ModalCloseButton />
           <ModalBody py={6}>
-            {activePreview && (
+            {activePreview && !busy && !deleting ? (
               <Stack spacing={4} align="center">
                 <Box
                   as="img"
@@ -771,6 +824,7 @@ export default function ImageGallery({ isActive = false }) {
                       aria-label="Previous image"
                       icon={<ArrowLeftIcon />}
                       onClick={showPrevious}
+                      isDisabled={imagePage <= 1 && previewIndex === 0}
                     />
                   )}
                   {!isForcedPreview && (
@@ -779,6 +833,10 @@ export default function ImageGallery({ isActive = false }) {
                       aria-label="Next image"
                       icon={<ArrowRightIcon />}
                       onClick={showNext}
+                      isDisabled={
+                        imagePage >= Math.max(1, Math.ceil(imageTotal / imagePageSize)) &&
+                        previewIndex === images.length - 1
+                      }
                     />
                   )}
                 </HStack>
@@ -824,6 +882,10 @@ export default function ImageGallery({ isActive = false }) {
                   />
                 </HStack>
               </Stack>
+            ) : (
+              <Box display="flex" justifyContent="center" alignItems="center" minH="400px">
+                <Text color="gray.500">{busy || deleting ? 'Loading image...' : 'No images found'}</Text>
+              </Box>
             )}
           </ModalBody>
         </ModalContent>
