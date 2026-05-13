@@ -216,12 +216,20 @@ def create_app() -> FastAPI:
         model_id: str = Form(...),
         enable_restore: str = Form("0"),
         preserve_expression: str = Form("1"),
+        preserve_target_expression: str = Form("1"),
+        target_expression_strength: str = Form("0.85"),
         model_file: UploadFile = File(...),
         target_image: UploadFile = File(...),
     ):
         del model_id
         restore_enabled = _parse_form_bool(enable_restore)
         preserve_expression_enabled = _parse_form_bool(preserve_expression)
+        preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
+        try:
+            expression_strength = float(target_expression_strength)
+            expression_strength = max(0.0, min(1.0, expression_strength))
+        except (ValueError, TypeError):
+            expression_strength = 0.85
         model_bytes = await model_file.read()
         target_bytes = await target_image.read()
 
@@ -262,6 +270,8 @@ def create_app() -> FastAPI:
                 enable_restore=restore_enabled,
                 preserve_source_expression=preserve_expression_enabled,
                 source_expression_template=source_expression_template,
+                preserve_target_expression=preserve_target_expression_enabled,
+                target_expression_strength=expression_strength,
             )
         buffered = io.BytesIO()
         with timed_log(logger, "encode_output_image"):
@@ -307,6 +317,8 @@ def create_app() -> FastAPI:
         model_id: str = Form(...),
         enable_restore: str = Form("0"),
         preserve_expression: str = Form("1"),
+        preserve_target_expression: str = Form("1"),
+        target_expression_strength: str = Form("0.85"),
         callback_url: Optional[str] = Form(None),
         progress_url: Optional[str] = Form(None),
         callback_token: Optional[str] = Form(None),
@@ -316,6 +328,12 @@ def create_app() -> FastAPI:
         del model_id
         restore_enabled = _parse_form_bool(enable_restore)
         preserve_expression_enabled = _parse_form_bool(preserve_expression)
+        preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
+        try:
+            expression_strength = float(target_expression_strength)
+            expression_strength = max(0.0, min(1.0, expression_strength))
+        except (ValueError, TypeError):
+            expression_strength = 0.85
         model_bytes = await model_file.read()
         target_bytes = await target_video.read()
 
@@ -409,6 +427,8 @@ def create_app() -> FastAPI:
                         enable_restore=restore_enabled,
                         preserve_source_expression=preserve_expression_enabled,
                         source_expression_template=source_expression_template,
+                        preserve_target_expression=preserve_target_expression_enabled,
+                        target_expression_strength=expression_strength,
                     )
                     writer.write(swapped)
                     frame_count += 1

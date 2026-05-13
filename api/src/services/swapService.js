@@ -35,12 +35,13 @@ function shouldRetrySwapRequest(err) {
   return false;
 }
 
-async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore) {
+async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore, expressionStrength) {
   let response;
   for (let attempt = 0; attempt <= SWAP_MAX_RETRIES; attempt += 1) {
     const form = new FormData();
     form.append("model_id", String(modelId));
     form.append("enable_restore", enableRestore ? "1" : "0");
+    form.append("target_expression_strength", String(typeof expressionStrength === 'number' ? expressionStrength : 0.85));
     form.append("model_file", modelBytes, {
       filename: "model.safetensors",
       contentType: "application/octet-stream",
@@ -65,8 +66,7 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
         throw err;
       }
       console.warn(
-        `[WARN] POST /swap upstream request failed (attempt ${attempt + 1}/${SWAP_MAX_RETRIES + 1}): ${
-          err?.message || err
+        `[WARN] POST /swap upstream request failed (attempt ${attempt + 1}/${SWAP_MAX_RETRIES + 1}): ${err?.message || err
         }`
       );
       if (SWAP_RETRY_DELAY_MS > 0) {
@@ -77,7 +77,7 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
   return Buffer.from(response.data);
 }
 
-export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) {
+export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, expressionStrength) {
   const owner = await User.findOne({ id: ownerId });
   if (!owner) {
     throw new Error("Owner not found");
@@ -105,7 +105,8 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) 
     imageBytes,
     image.filename,
     modelId,
-    enableRestore
+    enableRestore,
+    expressionStrength
   );
 
   let driveResult;
@@ -131,7 +132,7 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore) 
       face_model_id: modelId,
     });
   } catch (err) {
-    await deleteFile(driveResult.drive_file_id, owner).catch(() => {});
+    await deleteFile(driveResult.drive_file_id, owner).catch(() => { });
     throw err;
   }
 
@@ -145,6 +146,7 @@ export async function triggerVideoSwap({
   video,
   modelId,
   enableRestore,
+  expressionStrength,
   callbackUrl,
   progressUrl,
   callbackToken,
@@ -168,6 +170,7 @@ export async function triggerVideoSwap({
   const form = new FormData();
   form.append("model_id", String(modelId));
   form.append("enable_restore", enableRestore ? "1" : "0");
+  form.append("target_expression_strength", String(typeof expressionStrength === 'number' ? expressionStrength : 0.85));
   if (callbackUrl) {
     form.append("callback_url", callbackUrl);
   }
@@ -206,9 +209,9 @@ export async function triggerVideoSwap({
   }
 }
 
-export function enqueueSwapJob(jobId) {
-  if (!swapQueue.includes(jobId)) {
-    swapQueue.push(jobId);
+export function enqueueSwapJob(jobId, expressionStrength = 0.85) {
+  if (!swapQueue.some((item) => item.jobId === jobId)) {
+    swapQueue.push({ jobId, expressionStrength });
   }
   void processSwapQueue();
 }
@@ -221,7 +224,7 @@ async function processSwapQueue() {
 
   try {
     while (swapQueue.length > 0) {
-      const jobId = swapQueue.shift();
+      const { jobId, expressionStrength: strength } = swapQueue.shift();
       const job = await SwapJob.findOne({ id: jobId });
       if (!job || job.status !== "queued") {
         continue;
@@ -238,7 +241,8 @@ async function processSwapQueue() {
           job.owner_id,
           job.face_model_id,
           job.input_image_id,
-          Boolean(job.enable_restore)
+          Boolean(job.enable_restore),
+          strength
         );
         job.status = "done";
         job.generated_image_id = generatedImageId;

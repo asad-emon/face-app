@@ -14,10 +14,11 @@ const router = express.Router();
 router.post("/swap-jobs", requireAuth, async (req, res) => {
   const modelId = Number(req.body?.model_id);
   const enableRestore = parseBoolean(req.body?.enable_restore, true);
+  const expressionStrength = Math.max(0, Math.min(1, Number(req.body?.expression_strength ?? 0.85))) || 0.85;
   const imageIds = Array.isArray(req.body?.image_ids)
     ? req.body.image_ids
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0)
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
     : [];
 
   if (!modelId || imageIds.length === 0) {
@@ -61,7 +62,7 @@ router.post("/swap-jobs", requireAuth, async (req, res) => {
     created.push(job);
   }
 
-  created.forEach((job) => enqueueSwapJob(job.id));
+  created.forEach((job) => enqueueSwapJob(job.id, expressionStrength));
   return res.status(202).json({
     items: created.map(serializeSwapJob),
     total: created.length,
@@ -103,6 +104,9 @@ router.post("/swap", requireAuth, async (req, res) => {
     req.query.enable_restore ?? req.body.enable_restore,
     true
   );
+  const expressionStrength = Math.max(0, Math.min(1, Number(
+    req.query.expression_strength ?? req.body.expression_strength ?? 0.85
+  ))) || 0.85;
 
   if (!modelId || !imageId) {
     return res.status(400).json({ detail: "model_id and image_id are required" });
@@ -112,7 +116,7 @@ router.post("/swap", requireAuth, async (req, res) => {
   }
 
   try {
-    const { outputBytes } = await runSwapAndStore(req.user.id, modelId, imageId, enableRestore);
+    const { outputBytes } = await runSwapAndStore(req.user.id, modelId, imageId, enableRestore, expressionStrength);
     return res.json({
       result: `data:image/jpeg;base64,${outputBytes.toString("base64")}`,
     });
@@ -132,6 +136,9 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
     req.query.enable_restore ?? req.body.enable_restore,
     false
   );
+  const expressionStrength = Math.max(0, Math.min(1, Number(
+    req.query.expression_strength ?? req.body.expression_strength ?? 0.85
+  ))) || 0.85;
   const video = req.file;
 
   if (!modelId) {
@@ -184,6 +191,7 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
       video,
       modelId,
       enableRestore,
+      expressionStrength,
       callbackUrl,
       progressUrl,
       callbackToken: INFERENCE_CALLBACK_TOKEN,

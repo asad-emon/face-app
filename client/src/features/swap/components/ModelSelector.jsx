@@ -1,5 +1,19 @@
-import React from 'react';
-import { Checkbox, FormControl, FormLabel, Select, Stack } from '@chakra-ui/react';
+import React, { useState } from 'react';
+import {
+  Box,
+  Checkbox,
+  FormControl,
+  FormLabel,
+  Select,
+  Slider,
+  SliderFilledTrack,
+  SliderMark,
+  SliderThumb,
+  SliderTrack,
+  Stack,
+  Text,
+  Tooltip,
+} from '@chakra-ui/react';
 import { useSwap } from '../SwapContext.jsx';
 
 export default function ModelSelector() {
@@ -10,10 +24,15 @@ export default function ModelSelector() {
     selectedModelId,
     enableRestore,
     setEnableRestore,
+    expressionStrength,
+    setExpressionStrength,
     handlePersonChange,
     setSelectedModelId,
     controlsDisabled,
   } = useSwap();
+
+  const strengthPct = Math.round(expressionStrength * 100);
+  const [showTooltip, setShowTooltip] = useState(false);
 
   return (
     <Stack
@@ -66,6 +85,50 @@ export default function ModelSelector() {
       >
         Enable face restore (slower, better quality)
       </Checkbox>
+
+      <Box>
+        <Text fontSize="sm" mb={4} color="gray.300">
+          Expression Strength:{' '}
+          <Text as="span" fontWeight="bold" color="brand.200">
+            {strengthPct}%
+          </Text>
+        </Text>
+        <Slider
+          min={0}
+          max={100}
+          step={5}
+          value={strengthPct}
+          onChange={(val) => setExpressionStrength(val / 100)}
+          isDisabled={controlsDisabled}
+          aria-label="expression-strength"
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+        >
+          <SliderMark value={0} mt={2} fontSize="xs" color="gray.500">
+            0%
+          </SliderMark>
+          <SliderMark value={50} mt={2} ml="-3" fontSize="xs" color="gray.500">
+            50%
+          </SliderMark>
+          <SliderMark value={100} mt={2} ml="-6" fontSize="xs" color="gray.500">
+            100%
+          </SliderMark>
+          <SliderTrack bg="whiteAlpha.200">
+            <SliderFilledTrack bg="brand.400" />
+          </SliderTrack>
+          <Tooltip
+            hasArrow
+            label={`${strengthPct}%`}
+            placement="top"
+            isOpen={showTooltip}
+          >
+            <SliderThumb boxSize={4} bg="brand.300" />
+          </Tooltip>
+        </Slider>
+        <Text fontSize="xs" color="gray.500" mt={5}>
+          How strongly the target's original expression is restored after the swap.
+        </Text>
+      </Box>
     </Stack>
   );
 }
