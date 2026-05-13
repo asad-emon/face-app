@@ -28,6 +28,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   DeleteIcon,
+  LinkIcon,
   MinusIcon,
   RepeatIcon,
 } from '@chakra-ui/icons';
@@ -800,24 +801,21 @@ export default function ImageGallery({ isActive = false }) {
         size="6xl"
       >
         <ModalOverlay />
-        <ModalContent bg="#0b0f1a">
+        <ModalContent bg="#0b0f1a" marginY={6}>
           <ModalCloseButton />
           <ModalBody py={6}>
             {activePreview && !busy && !deleting ? (
-              <Stack spacing={4} align="center">
-                <Box
-                  as="img"
-                  src={`data:image/jpeg;base64,${activePreview.data}`}
-                  alt="Preview"
-                  maxH="70vh"
-                  style={{ transform: `scale(${zoomLevel})`, transition: 'transform 120ms ease-out' }}
-                />
-                {!isForcedPreview && (
-                  <Text color="gray.500">
-                    {previewIndex + 1} / {images.length}
-                  </Text>
-                )}
-                <HStack spacing={2}>
+              <Stack spacing={2} align="center">
+                <Box h="70vh" alignContent="center">
+                  <Box
+                    as="img"
+                    src={`data:image/jpeg;base64,${activePreview.data}`}
+                    alt="Preview"
+                    maxH="70vh"
+                    style={{ transform: `scale(${zoomLevel})`, transition: 'transform 120ms ease-out' }}
+                  />
+                </Box>
+                <HStack spacing={1}>
                   {!isForcedPreview && (
                     <IconButton
                       variant="outline"
@@ -826,6 +824,11 @@ export default function ImageGallery({ isActive = false }) {
                       onClick={showPrevious}
                       isDisabled={imagePage <= 1 && previewIndex === 0}
                     />
+                  )}
+                  {!isForcedPreview && (
+                    <Text color="gray.500" align="center">
+                      {previewIndex + 1} / {images.length}
+                    </Text>
                   )}
                   {!isForcedPreview && (
                     <IconButton
@@ -839,15 +842,17 @@ export default function ImageGallery({ isActive = false }) {
                       }
                     />
                   )}
-                </HStack>
-                <HStack spacing={2}>
                   <IconButton
                     variant="outline"
                     aria-label="Zoom out"
                     icon={<MinusIcon />}
                     onClick={handleZoomOut}
                   />
-                  <Text color="gray.500" fontSize="sm" minW="80px" textAlign="center">
+                  <Text color="gray.500"
+                    fontSize="sm"
+                    minW="20px"
+                    textAlign="center"
+                  >
                     {Math.round(zoomLevel * 100)}%
                   </Text>
                   <IconButton
@@ -856,14 +861,8 @@ export default function ImageGallery({ isActive = false }) {
                     icon={<AddIcon />}
                     onClick={handleZoomIn}
                   />
-                  <IconButton
-                    variant="outline"
-                    aria-label="Reset zoom"
-                    icon={<RepeatIcon />}
-                    onClick={handleZoomReset}
-                  />
                 </HStack>
-                <HStack spacing={3}>
+                <HStack spacing={1}>
                   <IconButton
                     variant="outline"
                     colorScheme="red"
@@ -876,7 +875,7 @@ export default function ImageGallery({ isActive = false }) {
                     variant="outline"
                     colorScheme="red"
                     aria-label="Delete source image"
-                    icon={<DeleteIcon />}
+                    icon={<LinkIcon color="red.500" />}
                     onClick={() => deleteSourceImage(activePreview.input_image_id)}
                     isDisabled={busy || deleting || !activePreview.input_image_id}
                   />
