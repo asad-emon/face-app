@@ -83,7 +83,7 @@ export default function ModelSelector() {
         onChange={(event) => setEnableRestore(event.target.checked)}
         isDisabled={controlsDisabled}
       >
-        Enable face restore (slower, better quality)
+        Enable face restore for sharper details and more stable expressions
       </Checkbox>
 
       <Box>
