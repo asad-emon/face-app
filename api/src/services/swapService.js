@@ -39,13 +39,16 @@ function shouldRetrySwapRequest(err) {
   return false;
 }
 
-async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore, expressionStrength) {
+async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore, expressionStrength, manualGender) {
   let response;
   for (let attempt = 0; attempt <= SWAP_MAX_RETRIES; attempt += 1) {
     const form = new FormData();
     form.append("model_id", String(modelId));
     form.append("enable_restore", enableRestore ? "1" : "0");
     form.append("target_expression_strength", String(typeof expressionStrength === 'number' ? expressionStrength : 0.85));
+    if (manualGender === "M" || manualGender === "F") {
+      form.append("manual_gender", manualGender);
+    }
     form.append("model_file", modelBytes, {
       filename: "model.safetensors",
       contentType: "application/octet-stream",
@@ -110,7 +113,8 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
     image.filename,
     modelId,
     enableRestore,
-    expressionStrength
+    expressionStrength,
+    model.gender || null
   );
 
   let driveResult;
@@ -152,6 +156,7 @@ export async function triggerVideoSwap({
   modelId,
   enableRestore,
   expressionStrength,
+  manualGender,
   callbackUrl,
   progressUrl,
   callbackToken,
@@ -160,6 +165,9 @@ export async function triggerVideoSwap({
   form.append("model_id", String(modelId));
   form.append("enable_restore", enableRestore ? "1" : "0");
   form.append("target_expression_strength", String(typeof expressionStrength === 'number' ? expressionStrength : 0.85));
+  if (manualGender === "M" || manualGender === "F") {
+    form.append("manual_gender", manualGender);
+  }
   if (callbackUrl) {
     form.append("callback_url", callbackUrl);
   }
@@ -328,6 +336,7 @@ async function processVideoSwapQueue() {
           modelId: video.face_model_id,
           enableRestore: Boolean(video.enable_restore),
           expressionStrength: video.expression_strength,
+          manualGender: model.gender || null,
           callbackUrl,
           progressUrl,
           callbackToken: INFERENCE_CALLBACK_TOKEN,

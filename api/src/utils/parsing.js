@@ -43,6 +43,16 @@ export function parseBoolean(rawValue, defaultValue = false) {
   return defaultValue;
 }
 
+export function parseGender(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === "" || rawValue === "auto") {
+    return null;
+  }
+  const v = String(rawValue).toUpperCase().trim();
+  if (v === "M" || v === "MALE") return "M";
+  if (v === "F" || v === "FEMALE") return "F";
+  return null;
+}
+
 export function getErrorDetail(err) {
   const responseData = err?.response?.data;
   if (responseData?.detail) {

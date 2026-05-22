@@ -231,6 +231,7 @@ def create_app() -> FastAPI:
         preserve_target_expression: str = Form("1"),
         target_expression_strength: str = Form("0.85"),
         apply_hair: str = Form("1"),
+        manual_gender: Optional[str] = Form(None),
         model_file: UploadFile = File(...),
         target_image: UploadFile = File(...),
     ):
@@ -278,11 +279,18 @@ def create_app() -> FastAPI:
             )
             raise HTTPException(status_code=400, detail=f"Invalid target_image: {exc}")
 
+        # Manual gender override takes priority over auto-detected gender in safetensors
+        effective_gender = source_gender
+        if manual_gender and manual_gender.strip().upper() in ("M", "F"):
+            effective_gender = manual_gender.strip().upper()
+
         logger.info(
             "swap_remote_params",
             extra={
                 "event": "swap_remote_params",
                 "source_gender": source_gender,
+                "manual_gender": manual_gender,
+                "effective_gender": effective_gender,
                 "apply_hair": apply_hair_enabled,
                 "restore": restore_enabled,
             },
@@ -297,7 +305,7 @@ def create_app() -> FastAPI:
                 source_expression_template=source_expression_template,
                 preserve_target_expression=preserve_target_expression_enabled,
                 target_expression_strength=expression_strength,
-                source_gender=source_gender,
+                source_gender=effective_gender,
                 apply_hair=apply_hair_enabled,
             )
         buffered = io.BytesIO()
@@ -369,6 +377,7 @@ def create_app() -> FastAPI:
         preserve_target_expression: str = Form("1"),
         target_expression_strength: str = Form("0.85"),
         apply_hair: str = Form("1"),
+        manual_gender: Optional[str] = Form(None),
         callback_url: Optional[str] = Form(None),
         progress_url: Optional[str] = Form(None),
         callback_token: Optional[str] = Form(None),
@@ -405,6 +414,11 @@ def create_app() -> FastAPI:
                 extra={"event": "invalid_model_file_video", "error": str(exc)},
             )
             raise HTTPException(status_code=400, detail=f"Invalid model_file: {exc}")
+
+        # Manual gender override takes priority over auto-detected gender in safetensors
+        effective_gender = source_gender
+        if manual_gender and manual_gender.strip().upper() in ("M", "F"):
+            effective_gender = manual_gender.strip().upper()
 
         if source_embedding is None:
             raise HTTPException(status_code=400, detail="Model file missing 'embedding'")
@@ -481,7 +495,7 @@ def create_app() -> FastAPI:
                         source_expression_template=source_expression_template,
                         preserve_target_expression=preserve_target_expression_enabled,
                         target_expression_strength=expression_strength,
-                        source_gender=source_gender,
+                        source_gender=effective_gender,
                         apply_hair=apply_hair_enabled,
                     )
                     writer.write(swapped)

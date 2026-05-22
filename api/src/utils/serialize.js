@@ -12,6 +12,7 @@ export function serializeFaceModel(model) {
     is_active: Boolean(model.is_active),
     is_deleted: Boolean(model.is_deleted),
     owner_id: model.owner_id,
+    gender: model.gender || null,
   };
 }
 

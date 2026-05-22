@@ -6,7 +6,7 @@ import { INFERENCE_BASE_URL } from "../config.js";
 import upload from "../middleware/upload.js";
 import { requireAuth } from "../middleware/auth.js";
 import { logApiError } from "../utils/logging.js";
-import { parseRequestedVersion, parseSetActive } from "../utils/parsing.js";
+import { parseRequestedVersion, parseSetActive, parseGender } from "../utils/parsing.js";
 import { serializeFaceModel } from "../utils/serialize.js";
 import {
   ensureActiveForPerson,
@@ -29,6 +29,7 @@ router.post(
     const personName = (req.body.person_name || req.body.name || "").trim();
     const requestedVersion = parseRequestedVersion(req.body.version);
     const setActive = parseSetActive(req.body.set_active);
+    const gender = parseGender(req.body.gender);
     const files = req.files || [];
 
     if (!personName) {
@@ -98,6 +99,7 @@ router.post(
         mime_type: driveResult.mime_type,
         size: driveResult.size,
         owner_id: req.user.id,
+        gender,
       });
 
       const activeModel = await FaceModel.findOne({
@@ -131,6 +133,7 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
   const personName = (req.body.person_name || req.body.name || "").trim();
   const requestedVersion = parseRequestedVersion(req.body.version);
   const setActive = parseSetActive(req.body.set_active);
+  const gender = parseGender(req.body.gender);
   const file = req.file;
 
   if (!personName) {
@@ -186,6 +189,7 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
       mime_type: driveResult.mime_type,
       size: driveResult.size,
       owner_id: req.user.id,
+      gender,
     });
 
     const activeModel = await FaceModel.findOne({
@@ -210,6 +214,28 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
     }
     logApiError("POST /models/upload", err);
     return res.status(500).json({ detail: "Model upload failed" });
+  }
+});
+
+router.patch("/models/:id/gender", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid model id" });
+  }
+  const gender = parseGender(req.body.gender);
+  try {
+    const updated = await FaceModel.findOneAndUpdate(
+      { id, owner_id: req.user.id, is_deleted: false },
+      { $set: { gender } },
+      { new: true }
+    ).lean();
+    if (!updated) {
+      return res.status(404).json({ detail: "Model not found" });
+    }
+    return res.json(serializeFaceModel(updated));
+  } catch (err) {
+    logApiError("PATCH /models/:id/gender", err);
+    return res.status(500).json({ detail: "Failed to update gender" });
   }
 });
 

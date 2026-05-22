@@ -58,6 +58,7 @@ const faceModelSchema = new Schema(
     mime_type: { type: String, default: "application/octet-stream" },
     size: { type: Number, default: 0 },
     owner_id: { type: Number, required: true, index: true },
+    gender: { type: String, enum: ["M", "F", null], default: null },
   },
   { collection: "face_models", versionKey: false }
 );

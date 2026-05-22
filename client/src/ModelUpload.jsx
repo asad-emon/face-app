@@ -13,6 +13,7 @@ import {
   Input,
   NumberInput,
   NumberInputField,
+  Select,
   SimpleGrid,
   Stack,
   Tab,
@@ -46,6 +47,7 @@ export default function ModelUpload() {
   const [items, setItems] = useState([]);
   const [models, setModels] = useState([]);
   const [safetensorFile, setSafetensorFile] = useState(null);
+  const [gender, setGender] = useState('');
   const [busy, setBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
   const itemsRef = useRef(items);
@@ -205,12 +207,39 @@ export default function ModelUpload() {
     if (parsedVersion !== null) {
       formData.append('version', String(parsedVersion));
     }
+    if (gender) {
+      formData.append('gender', gender);
+    }
   };
 
   const resetModelInputs = () => {
     setPersonName('');
     setVersionInput('');
     setSetActive(true);
+    setGender('');
+  };
+
+  const handleGenderChange = async (modelId, newGender) => {
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/models/${modelId}/gender`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ gender: newGender || null }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to update gender');
+      }
+      await fetchModels();
+    } catch (error) {
+      alert('Error: ' + error.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleGenerateModel = async () => {
@@ -390,7 +419,7 @@ export default function ModelUpload() {
           </Text>
         </Box>
 
-        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
           <FormControl>
             <FormLabel>Person Name</FormLabel>
             <Input
@@ -404,6 +433,17 @@ export default function ModelUpload() {
             <NumberInput min={1} value={versionInput} onChange={(value) => setVersionInput(value)}>
               <NumberInputField placeholder="Optional (auto-increments)" />
             </NumberInput>
+          </FormControl>
+          <FormControl>
+            <FormLabel>Gender</FormLabel>
+            <Select
+              value={gender}
+              onChange={(e) => setGender(e.target.value)}
+              placeholder="Auto-detect"
+            >
+              <option value="F">Female</option>
+              <option value="M">Male</option>
+            </Select>
           </FormControl>
         </SimpleGrid>
 
@@ -546,8 +586,24 @@ export default function ModelUpload() {
                           <HStack>
                             <Text>v{model.version || 1}</Text>
                             {model.is_active && <Badge colorScheme="green">Active</Badge>}
+                            {model.gender && (
+                              <Badge colorScheme={model.gender === 'F' ? 'pink' : 'blue'}>
+                                {model.gender === 'F' ? 'Female' : 'Male'}
+                              </Badge>
+                            )}
                           </HStack>
-                          <HStack spacing={2}>
+                          <HStack spacing={2} flexWrap="wrap">
+                            <Select
+                              size="sm"
+                              value={model.gender || ''}
+                              onChange={(e) => handleGenderChange(model.id, e.target.value)}
+                              isDisabled={busy}
+                              w="120px"
+                              placeholder="Auto"
+                            >
+                              <option value="F">Female</option>
+                              <option value="M">Male</option>
+                            </Select>
                             <Button
                               size="sm"
                               variant="outline"
