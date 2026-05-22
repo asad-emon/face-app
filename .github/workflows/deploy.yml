@@ -36,3 +36,21 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./client/dist/
           server-dir: ./dist/
+
+      - name: Deploy backend code to cPanel
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./api/
+          server-dir: ./api/
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.env
+            **/.env.*
+            **/tmp/**
+            **/Dockerfile*
+            **/.dockerignore
