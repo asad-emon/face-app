@@ -5,9 +5,14 @@ import cv2
 import numpy as np
 from PIL import Image
 from skimage.exposure import match_histograms
+from insightface.utils.face_align import estimate_norm
 
 from .model_registry import ModelRegistry, get_model_registry
 from .observability import get_logger, timed_log
+
+SWAP_MODEL_INSWAPPER = "inswapper_128"
+SWAP_MODEL_HYPERSWAP = "hyperswap_256"
+VALID_SWAP_MODELS = {SWAP_MODEL_INSWAPPER, SWAP_MODEL_HYPERSWAP}
 
 
 @dataclass
@@ -175,6 +180,68 @@ class FaceSwapService:
         full_mask[inner_y1:inner_y2, inner_x1:inner_x2] = 0
 
         return full_mask
+
+    @staticmethod
+    def _run_hyperswap(
+        img_bgr: np.ndarray,
+        face,
+        source_embedding: np.ndarray,
+        hyperswap_session,
+    ) -> np.ndarray:
+        kps = getattr(face, "kps", None)
+        if kps is None or len(kps) < 5:
+            return img_bgr
+
+        h, w = img_bgr.shape[:2]
+
+        M = estimate_norm(kps[:5].astype(np.float32), 256, mode="arcface")
+        if M is None:
+            return img_bgr
+        aimg = cv2.warpAffine(img_bgr, M, (256, 256), flags=cv2.INTER_LINEAR)
+
+        emb = np.asarray(source_embedding, dtype=np.float32).ravel()
+        norm = np.linalg.norm(emb)
+        emb = (emb / norm) if norm > 0 else emb
+        emb_batch = emb[np.newaxis, :]
+
+        target_rgb = aimg[:, :, ::-1].copy().astype(np.float32)
+        target_norm = target_rgb / 127.5 - 1.0
+        target_batch = np.transpose(target_norm, (2, 0, 1))[np.newaxis, :].astype(np.float32)
+
+        feed = {}
+        for inp in hyperswap_session.get_inputs():
+            if len(inp.shape) == 4:
+                feed[inp.name] = target_batch
+            else:
+                feed[inp.name] = emb_batch
+
+        out = hyperswap_session.run([hyperswap_session.get_outputs()[0].name], feed)[0]
+        swapped = out[0]
+        if swapped.shape[0] == 3:
+            swapped = np.transpose(swapped, (1, 2, 0))
+
+        swapped_uint8 = ((swapped + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+        swapped_bgr = swapped_uint8[:, :, ::-1].copy()
+
+        IM = cv2.invertAffineTransform(M)
+        swapped_full = cv2.warpAffine(
+            swapped_bgr, IM, (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT_101,
+        )
+
+        mask_aligned = np.zeros((256, 256), dtype=np.uint8)
+        cv2.ellipse(mask_aligned, (128, 128), (110, 110), 0, 0, 360, 255, -1)
+        mask_aligned = cv2.GaussianBlur(mask_aligned, (21, 21), 0)
+        mask_full = cv2.warpAffine(
+            mask_aligned, IM, (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderValue=0,
+        ).astype(np.float32) / 255.0
+
+        alpha = mask_full[:, :, np.newaxis]
+        result = swapped_full.astype(np.float32) * alpha + img_bgr.astype(np.float32) * (1.0 - alpha)
+        return result.clip(0, 255).astype(np.uint8)
 
     def _apply_long_black_hair(self, img_bgr: np.ndarray, face) -> np.ndarray:
         """Replace hair with long black hair via segmentation + recoloring."""
@@ -368,6 +435,7 @@ class FaceSwapService:
         target_expression_strength: float = 0.85,
         source_gender: Optional[str] = None,
         apply_hair: bool = True,
+        swap_model: str = SWAP_MODEL_INSWAPPER,
     ) -> Image.Image:
         img_rgb = np.array(pil_img)
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
@@ -382,6 +450,7 @@ class FaceSwapService:
             target_expression_strength=target_expression_strength,
             source_gender=source_gender,
             apply_hair=apply_hair,
+            swap_model=swap_model,
         )
 
         return Image.fromarray(cv2.cvtColor(swapped_bgr, cv2.COLOR_BGR2RGB))
@@ -397,12 +466,15 @@ class FaceSwapService:
         target_expression_strength: float = 0.85,
         source_gender: Optional[str] = None,
         apply_hair: bool = True,
+        swap_model: str = SWAP_MODEL_INSWAPPER,
     ) -> np.ndarray:
         img_bgr = np.ascontiguousarray(img_bgr)
+        use_hyperswap = swap_model == SWAP_MODEL_HYPERSWAP
 
         self._registry.prepare_face_analyzer_for_image(img_bgr.shape)
         face_analyzer = self._registry.get_face_analyzer()
-        swapper = self._registry.get_swapper()
+        swapper = None if use_hyperswap else self._registry.get_swapper()
+        hyperswap_session = self._registry.get_hyperswap_session() if use_hyperswap else None
         gpen_session = self._registry.get_gpen_session() if enable_restore else None
 
         with timed_log(
@@ -451,7 +523,10 @@ class FaceSwapService:
                         )
                         continue
 
-                img_bgr = swapper.get(img_bgr, face, source_face, paste_back=True)
+                if use_hyperswap:
+                    img_bgr = self._run_hyperswap(img_bgr, face, source_embedding, hyperswap_session)
+                else:
+                    img_bgr = swapper.get(img_bgr, face, source_face, paste_back=True)
                 swapped_face_objs.append(face)
 
                 if preserve_source_expression:

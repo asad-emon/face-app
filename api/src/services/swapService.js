@@ -39,7 +39,7 @@ function shouldRetrySwapRequest(err) {
   return false;
 }
 
-async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore, expressionStrength, manualGender) {
+async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore, expressionStrength, manualGender, swapModel = "inswapper_128") {
   let response;
   for (let attempt = 0; attempt <= SWAP_MAX_RETRIES; attempt += 1) {
     const form = new FormData();
@@ -48,6 +48,9 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
     form.append("target_expression_strength", String(typeof expressionStrength === 'number' ? expressionStrength : 0.85));
     if (manualGender === "M" || manualGender === "F") {
       form.append("manual_gender", manualGender);
+    }
+    if (swapModel && swapModel !== "inswapper_128") {
+      form.append("swap_model", swapModel);
     }
     form.append("model_file", modelBytes, {
       filename: "model.safetensors",
@@ -84,7 +87,7 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
   return Buffer.from(response.data);
 }
 
-export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, expressionStrength) {
+export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, expressionStrength, swapModel = "inswapper_128") {
   const owner = await User.findOne({ id: ownerId });
   if (!owner) {
     throw new Error("Owner not found");
@@ -114,7 +117,8 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
     modelId,
     enableRestore,
     expressionStrength,
-    model.gender || null
+    model.gender || null,
+    swapModel
   );
 
   let driveResult;
@@ -157,6 +161,7 @@ export async function triggerVideoSwap({
   enableRestore,
   expressionStrength,
   manualGender,
+  swapModel,
   callbackUrl,
   progressUrl,
   callbackToken,
@@ -167,6 +172,9 @@ export async function triggerVideoSwap({
   form.append("target_expression_strength", String(typeof expressionStrength === 'number' ? expressionStrength : 0.85));
   if (manualGender === "M" || manualGender === "F") {
     form.append("manual_gender", manualGender);
+  }
+  if (swapModel && swapModel !== "inswapper_128") {
+    form.append("swap_model", swapModel);
   }
   if (callbackUrl) {
     form.append("callback_url", callbackUrl);
@@ -228,7 +236,8 @@ async function processSwapQueue() {
           job.face_model_id,
           job.input_image_id,
           Boolean(job.enable_restore),
-          strength
+          strength,
+          job.swap_model || "inswapper_128"
         );
         job.status = "done";
         job.generated_image_id = generatedImageId;
@@ -337,6 +346,7 @@ async function processVideoSwapQueue() {
           enableRestore: Boolean(video.enable_restore),
           expressionStrength: video.expression_strength,
           manualGender: model.gender || null,
+          swapModel: video.swap_model || "inswapper_128",
           callbackUrl,
           progressUrl,
           callbackToken: INFERENCE_CALLBACK_TOKEN,

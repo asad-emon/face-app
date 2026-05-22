@@ -43,6 +43,12 @@ export function parseBoolean(rawValue, defaultValue = false) {
   return defaultValue;
 }
 
+export function parseSwapModel(rawValue) {
+  const v = String(rawValue || "").trim().toLowerCase();
+  if (v === "hyperswap_256") return "hyperswap_256";
+  return "inswapper_128";
+}
+
 export function parseGender(rawValue) {
   if (rawValue === undefined || rawValue === null || rawValue === "" || rawValue === "auto") {
     return null;

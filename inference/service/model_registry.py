@@ -21,6 +21,7 @@ class ModelRegistry:
         self._lock = Lock()
         self._models: Optional[ModelTuple] = None
         self._gpen_session: Optional[ort.InferenceSession] = None
+        self._hyperswap_session: Optional[ort.InferenceSession] = None
         self._current_det_size: Optional[int] = None
 
     def _download_model(self, filename: str) -> str:
@@ -116,6 +117,18 @@ class ModelRegistry:
                             providers=["CPUExecutionProvider"],
                         )
         return self._gpen_session
+
+    def get_hyperswap_session(self) -> Optional[ort.InferenceSession]:
+        if self._hyperswap_session is None:
+            with self._lock:
+                if self._hyperswap_session is None:
+                    with timed_log(logger, "hyperswap_initialize"):
+                        hyperswap_path = self._download_model("Hyperswap_1b_256.onnx")
+                        self._hyperswap_session = ort.InferenceSession(
+                            hyperswap_path,
+                            providers=["CPUExecutionProvider"],
+                        )
+        return self._hyperswap_session
 
 
 _REGISTRY: Optional[ModelRegistry] = None

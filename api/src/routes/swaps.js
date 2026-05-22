@@ -4,7 +4,7 @@ import { API_BASE_URL, INFERENCE_BASE_URL, SWAP_QUEUE_POLL_LIMIT } from "../conf
 import { requireAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
-import { getErrorDetail, parseBoolean } from "../utils/parsing.js";
+import { getErrorDetail, parseBoolean, parseSwapModel } from "../utils/parsing.js";
 import { serializeGeneratedVideo, serializeSwapJob } from "../utils/serialize.js";
 import { uploadBuffer, deleteFile } from "../services/driveStorage.js";
 import { enqueueSwapJob, enqueueVideoSwapJob, runSwapAndStore } from "../services/swapService.js";
@@ -15,6 +15,7 @@ router.post("/swap-jobs", requireAuth, async (req, res) => {
   const modelId = Number(req.body?.model_id);
   const enableRestore = parseBoolean(req.body?.enable_restore, true);
   const expressionStrength = Math.max(0, Math.min(1, Number(req.body?.expression_strength ?? 0.85))) || 0.85;
+  const swapModel = parseSwapModel(req.body?.swap_model);
   const imageIds = Array.isArray(req.body?.image_ids)
     ? req.body.image_ids
       .map((value) => Number(value))
@@ -57,6 +58,7 @@ router.post("/swap-jobs", requireAuth, async (req, res) => {
       face_model_id: modelId,
       input_image_id: imageId,
       enable_restore: enableRestore,
+      swap_model: swapModel,
       status: "queued",
     });
     created.push(job);
@@ -107,6 +109,7 @@ router.post("/swap", requireAuth, async (req, res) => {
   const expressionStrength = Math.max(0, Math.min(1, Number(
     req.query.expression_strength ?? req.body.expression_strength ?? 0.85
   ))) || 0.85;
+  const swapModel = parseSwapModel(req.query.swap_model ?? req.body?.swap_model);
 
   if (!modelId || !imageId) {
     return res.status(400).json({ detail: "model_id and image_id are required" });
@@ -116,7 +119,7 @@ router.post("/swap", requireAuth, async (req, res) => {
   }
 
   try {
-    const { outputBytes } = await runSwapAndStore(req.user.id, modelId, imageId, enableRestore, expressionStrength);
+    const { outputBytes } = await runSwapAndStore(req.user.id, modelId, imageId, enableRestore, expressionStrength, swapModel);
     return res.json({
       result: `data:image/jpeg;base64,${outputBytes.toString("base64")}`,
     });
@@ -146,6 +149,7 @@ router.post(
   const expressionStrength = Math.max(0, Math.min(1, Number(
     req.query.expression_strength ?? req.body.expression_strength ?? 0.85
   ))) || 0.85;
+  const swapModel = parseSwapModel(req.query.swap_model ?? req.body?.swap_model);
   const videos = [
     ...(Array.isArray(req.files?.file) ? req.files.file : []),
     ...(Array.isArray(req.files?.files) ? req.files.files : []),
@@ -205,6 +209,7 @@ router.post(
         face_model_id: modelId,
         enable_restore: enableRestore,
         expression_strength: expressionStrength,
+        swap_model: swapModel,
       });
       created.push(generatedVideo);
     }

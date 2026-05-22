@@ -15,7 +15,7 @@ from fastapi.responses import Response, JSONResponse
 from PIL import Image
 from safetensors.numpy import load as load_safetensor, save as save_safetensor
 
-from .face_swap import FaceSwapService, GENDER_FEMALE, GENDER_MALE
+from .face_swap import FaceSwapService, GENDER_FEMALE, GENDER_MALE, SWAP_MODEL_INSWAPPER, VALID_SWAP_MODELS
 from .observability import configure_logging, get_logger, timed_log
 
 
@@ -232,6 +232,7 @@ def create_app() -> FastAPI:
         target_expression_strength: str = Form("0.85"),
         apply_hair: str = Form("1"),
         manual_gender: Optional[str] = Form(None),
+        swap_model: Optional[str] = Form(None),
         model_file: UploadFile = File(...),
         target_image: UploadFile = File(...),
     ):
@@ -240,6 +241,9 @@ def create_app() -> FastAPI:
         preserve_expression_enabled = _parse_form_bool(preserve_expression)
         preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
         apply_hair_enabled = _parse_form_bool(apply_hair)
+        effective_swap_model = SWAP_MODEL_INSWAPPER
+        if swap_model and swap_model.strip().lower() in VALID_SWAP_MODELS:
+            effective_swap_model = swap_model.strip().lower()
         try:
             expression_strength = float(target_expression_strength)
             expression_strength = max(0.0, min(1.0, expression_strength))
@@ -307,6 +311,7 @@ def create_app() -> FastAPI:
                 target_expression_strength=expression_strength,
                 source_gender=effective_gender,
                 apply_hair=apply_hair_enabled,
+                swap_model=effective_swap_model,
             )
         buffered = io.BytesIO()
         with timed_log(logger, "encode_output_image"):
@@ -378,6 +383,7 @@ def create_app() -> FastAPI:
         target_expression_strength: str = Form("0.85"),
         apply_hair: str = Form("1"),
         manual_gender: Optional[str] = Form(None),
+        swap_model: Optional[str] = Form(None),
         callback_url: Optional[str] = Form(None),
         progress_url: Optional[str] = Form(None),
         callback_token: Optional[str] = Form(None),
@@ -389,6 +395,9 @@ def create_app() -> FastAPI:
         preserve_expression_enabled = _parse_form_bool(preserve_expression)
         preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
         apply_hair_enabled = _parse_form_bool(apply_hair)
+        effective_swap_model = SWAP_MODEL_INSWAPPER
+        if swap_model and swap_model.strip().lower() in VALID_SWAP_MODELS:
+            effective_swap_model = swap_model.strip().lower()
         try:
             expression_strength = float(target_expression_strength)
             expression_strength = max(0.0, min(1.0, expression_strength))
@@ -497,6 +506,7 @@ def create_app() -> FastAPI:
                         target_expression_strength=expression_strength,
                         source_gender=effective_gender,
                         apply_hair=apply_hair_enabled,
+                        swap_model=effective_swap_model,
                     )
                     writer.write(swapped)
                     frame_count += 1

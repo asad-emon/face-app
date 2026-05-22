@@ -22,6 +22,7 @@ export function SwapProvider({ children }) {
   const [selectedModelId, setSelectedModelId] = useState('');
   const [enableRestore, setEnableRestore] = useState(false);
   const [expressionStrength, setExpressionStrength] = useState(0.85);
+  const [swapModel, setSwapModel] = useState('inswapper_128');
   const [busy, setBusy] = useState(false);
   const [videoFiles, setVideoFiles] = useState([]);
   const [videoPreviewItems, setVideoPreviewItems] = useState([]);
@@ -274,7 +275,7 @@ export function SwapProvider({ children }) {
 
           updateImageItem(item.id, { status: 'swapping', imageId });
           const swapResponse = await fetch(
-            `${apiBaseUrl}/swap?model_id=${selectedModelId}&image_id=${imageId}&enable_restore=${enableRestore ? '1' : '0'}&expression_strength=${expressionStrength}`,
+            `${apiBaseUrl}/swap?model_id=${selectedModelId}&image_id=${imageId}&enable_restore=${enableRestore ? '1' : '0'}&expression_strength=${expressionStrength}&swap_model=${swapModel}`,
             {
               method: 'POST',
               headers: { Authorization: `Bearer ${token}` },
@@ -303,7 +304,7 @@ export function SwapProvider({ children }) {
       await fetchInputImages();
       setBusy(false);
     }
-  }, [selectedModelId, targetImages, token, enableRestore, expressionStrength, updateImageItem, fetchInputImages]);
+  }, [selectedModelId, targetImages, token, enableRestore, expressionStrength, swapModel, updateImageItem, fetchInputImages]);
 
   const handleReInference = useCallback(async () => {
     if (!selectedModelId) {
@@ -346,6 +347,7 @@ export function SwapProvider({ children }) {
           image_ids: queue,
           enable_restore: enableRestore,
           expression_strength: expressionStrength,
+          swap_model: swapModel,
         }),
       });
       if (!createResponse.ok) {
@@ -415,7 +417,7 @@ export function SwapProvider({ children }) {
       setReInferenceProgress((prev) => ({ ...prev, currentImageId: null }));
       setReInferenceBusy(false);
     }
-  }, [selectedModelId, selectedInputImageIds, token, enableRestore, expressionStrength, fetchInputImages]);
+  }, [selectedModelId, selectedInputImageIds, token, enableRestore, expressionStrength, swapModel, fetchInputImages]);
 
   const deleteInputImages = useCallback(
     async (ids) => {
@@ -484,6 +486,7 @@ export function SwapProvider({ children }) {
       formData.append('model_id', selectedModelId);
       formData.append('enable_restore', enableRestore ? '1' : '0');
       formData.append('expression_strength', String(expressionStrength));
+      formData.append('swap_model', swapModel);
 
       const response = await fetch(`${apiBaseUrl}/swap-video`, {
         method: 'POST',
@@ -506,7 +509,7 @@ export function SwapProvider({ children }) {
     } finally {
       setVideoBusy(false);
     }
-  }, [selectedModelId, videoFiles, videoUrl, enableRestore, expressionStrength, token, setVideoSelection]);
+  }, [selectedModelId, videoFiles, videoUrl, enableRestore, expressionStrength, swapModel, token, setVideoSelection]);
 
   const processedCount = useMemo(
     () => targetImages.filter((item) => item.status === 'done').length,
@@ -546,6 +549,8 @@ export function SwapProvider({ children }) {
       setEnableRestore,
       expressionStrength,
       setExpressionStrength,
+      swapModel,
+      setSwapModel,
       handlePersonChange,
       setSelectedModelId,
       targetImages,
@@ -598,6 +603,7 @@ export function SwapProvider({ children }) {
       selectedModelId,
       enableRestore,
       expressionStrength,
+      swapModel,
       handlePersonChange,
       targetImages,
       addFiles,

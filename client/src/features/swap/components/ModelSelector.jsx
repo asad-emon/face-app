@@ -26,6 +26,8 @@ export default function ModelSelector() {
     setEnableRestore,
     expressionStrength,
     setExpressionStrength,
+    swapModel,
+    setSwapModel,
     handlePersonChange,
     setSelectedModelId,
     controlsDisabled,
@@ -129,6 +131,20 @@ export default function ModelSelector() {
           How strongly the target's original expression is restored after the swap.
         </Text>
       </Box>
+
+      <FormControl isDisabled={controlsDisabled}>
+        <FormLabel>Swap Engine</FormLabel>
+        <Select
+          value={swapModel}
+          onChange={(event) => setSwapModel(event.target.value)}
+        >
+          <option value="inswapper_128">InSwapper 128 (default)</option>
+          <option value="hyperswap_256">HyperSwap 1B 256</option>
+        </Select>
+        <Text fontSize="xs" color="gray.500" mt={1}>
+          HyperSwap 1B 256 uses a higher-resolution model and may produce sharper results.
+        </Text>
+      </FormControl>
     </Stack>
   );
 }
