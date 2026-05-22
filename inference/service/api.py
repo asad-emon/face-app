@@ -15,12 +15,24 @@ from fastapi.responses import Response, JSONResponse
 from PIL import Image
 from safetensors.numpy import load as load_safetensor, save as save_safetensor
 
-from .face_swap import FaceSwapService
+from .face_swap import FaceSwapService, GENDER_FEMALE, GENDER_MALE
 from .observability import configure_logging, get_logger, timed_log
 
 
 def _parse_form_bool(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _gender_from_tensor(tensors: dict) -> Optional[str]:
+    """
+    Decode stored source_gender tensor back to 'M' / 'F' / None.
+    Stored as float32 scalar: 1.0 = male, 0.0 = female.
+    """
+    arr = tensors.get("source_gender")
+    if arr is None:
+        return None
+    val = float(np.asarray(arr).ravel()[0])
+    return GENDER_MALE if val > 0.5 else GENDER_FEMALE
 
 
 def _transcode_to_h264_mp4(raw_input_path: str, output_path: str, logger) -> None:
@@ -218,6 +230,7 @@ def create_app() -> FastAPI:
         preserve_expression: str = Form("1"),
         preserve_target_expression: str = Form("1"),
         target_expression_strength: str = Form("0.85"),
+        apply_hair: str = Form("1"),
         model_file: UploadFile = File(...),
         target_image: UploadFile = File(...),
     ):
@@ -225,6 +238,7 @@ def create_app() -> FastAPI:
         restore_enabled = _parse_form_bool(enable_restore)
         preserve_expression_enabled = _parse_form_bool(preserve_expression)
         preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
+        apply_hair_enabled = _parse_form_bool(apply_hair)
         try:
             expression_strength = float(target_expression_strength)
             expression_strength = max(0.0, min(1.0, expression_strength))
@@ -243,6 +257,7 @@ def create_app() -> FastAPI:
                 tensors = load_safetensor(model_bytes)
                 source_embedding = tensors.get("embedding")
                 source_expression_template = tensors.get("source_expression_template")
+                source_gender = _gender_from_tensor(tensors)
         except Exception as exc:
             logger.warning(
                 "invalid_model_file",
@@ -263,6 +278,16 @@ def create_app() -> FastAPI:
             )
             raise HTTPException(status_code=400, detail=f"Invalid target_image: {exc}")
 
+        logger.info(
+            "swap_remote_params",
+            extra={
+                "event": "swap_remote_params",
+                "source_gender": source_gender,
+                "apply_hair": apply_hair_enabled,
+                "restore": restore_enabled,
+            },
+        )
+
         with timed_log(logger, "swap_remote_inference", restore_enabled=restore_enabled):
             output_image = swap_service.swap_with_embedding(
                 target_pil,
@@ -272,6 +297,8 @@ def create_app() -> FastAPI:
                 source_expression_template=source_expression_template,
                 preserve_target_expression=preserve_target_expression_enabled,
                 target_expression_strength=expression_strength,
+                source_gender=source_gender,
+                apply_hair=apply_hair_enabled,
             )
         buffered = io.BytesIO()
         with timed_log(logger, "encode_output_image"):
@@ -285,6 +312,8 @@ def create_app() -> FastAPI:
 
         embeddings = []
         source_expression_template = None
+        detected_genders = []
+
         with timed_log(logger, "embedding_batch", file_count=len(files)):
             for upload in files:
                 data = await upload.read()
@@ -296,19 +325,39 @@ def create_app() -> FastAPI:
                 except Exception:
                     continue
 
-                embedding, expression_template = swap_service.extract_face_features(image)
+                embedding, expression_template, gender = swap_service.extract_face_features(image)
                 if embedding is not None:
                     embeddings.append(embedding)
                     if source_expression_template is None and expression_template is not None:
                         source_expression_template = expression_template
+                    if gender is not None:
+                        detected_genders.append(gender)
 
         if not embeddings:
             raise HTTPException(status_code=400, detail="No faces found in uploaded images")
 
         avg_embedding = np.mean(embeddings, axis=0)
         tensors = {"embedding": avg_embedding.astype(np.float32)}
+
         if source_expression_template is not None:
             tensors["source_expression_template"] = source_expression_template.astype(np.float32)
+
+        # Store majority-vote gender as a float32 scalar: 1.0 = male, 0.0 = female
+        if detected_genders:
+            male_count = sum(1 for g in detected_genders if g == GENDER_MALE)
+            majority_gender = GENDER_MALE if male_count > len(detected_genders) / 2 else GENDER_FEMALE
+            gender_value = 1.0 if majority_gender == GENDER_MALE else 0.0
+            tensors["source_gender"] = np.array([gender_value], dtype=np.float32)
+            logger.info(
+                "embedding_gender_detected",
+                extra={
+                    "event": "embedding_gender_detected",
+                    "gender": majority_gender,
+                    "votes": len(detected_genders),
+                    "male_votes": male_count,
+                },
+            )
+
         tensor_bytes = save_safetensor(tensors)
         return Response(content=tensor_bytes, media_type="application/octet-stream")
 
@@ -319,6 +368,7 @@ def create_app() -> FastAPI:
         preserve_expression: str = Form("1"),
         preserve_target_expression: str = Form("1"),
         target_expression_strength: str = Form("0.85"),
+        apply_hair: str = Form("1"),
         callback_url: Optional[str] = Form(None),
         progress_url: Optional[str] = Form(None),
         callback_token: Optional[str] = Form(None),
@@ -329,6 +379,7 @@ def create_app() -> FastAPI:
         restore_enabled = _parse_form_bool(enable_restore)
         preserve_expression_enabled = _parse_form_bool(preserve_expression)
         preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
+        apply_hair_enabled = _parse_form_bool(apply_hair)
         try:
             expression_strength = float(target_expression_strength)
             expression_strength = max(0.0, min(1.0, expression_strength))
@@ -347,6 +398,7 @@ def create_app() -> FastAPI:
                 tensors = load_safetensor(model_bytes)
                 source_embedding = tensors.get("embedding")
                 source_expression_template = tensors.get("source_expression_template")
+                source_gender = _gender_from_tensor(tensors)
         except Exception as exc:
             logger.warning(
                 "invalid_model_file_video",
@@ -429,6 +481,8 @@ def create_app() -> FastAPI:
                         source_expression_template=source_expression_template,
                         preserve_target_expression=preserve_target_expression_enabled,
                         target_expression_strength=expression_strength,
+                        source_gender=source_gender,
+                        apply_hair=apply_hair_enabled,
                     )
                     writer.write(swapped)
                     frame_count += 1

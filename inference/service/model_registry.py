@@ -46,9 +46,10 @@ class ModelRegistry:
 
     def _initialize_models(self) -> ModelTuple:
         with timed_log(logger, "model_initialize"):
+            # buffalo_l includes detection, recognition AND genderage modules
             face_analyzer = FaceAnalysis(
-                name="buffalo_sc",
-                allowed_modules=["detection", "recognition"],
+                name="buffalo_l",
+                allowed_modules=["detection", "recognition", "genderage"],
                 providers=["CPUExecutionProvider"],
             )
             initial_det_size = self._settings.detection_size_min
