@@ -3,6 +3,8 @@ import FormData from "form-data";
 import { FaceModel, GeneratedImage, InputImage, SwapJob, GeneratedVideo, User } from "../db.js";
 import {
   INFERENCE_BASE_URL,
+  INFERENCE_CALLBACK_TOKEN,
+  API_BASE_URL,
   SWAP_MAX_RETRIES,
   SWAP_RETRY_DELAY_MS,
   SWAP_TIMEOUT_MS,
@@ -17,6 +19,8 @@ import {
 
 const swapQueue = [];
 let swapWorkerActive = false;
+const videoSwapQueue = [];
+let videoSwapWorkerActive = false;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -141,9 +145,10 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
 
 export async function triggerVideoSwap({
   generatedVideoId,
-  ownerId,
-  modelDriveId,
-  video,
+  modelBytes,
+  videoBytes,
+  videoFilename,
+  videoMimeType,
   modelId,
   enableRestore,
   expressionStrength,
@@ -151,22 +156,6 @@ export async function triggerVideoSwap({
   progressUrl,
   callbackToken,
 }) {
-  let modelBytes;
-  try {
-    const owner = await User.findOne({ id: ownerId });
-    if (!owner) {
-      throw new Error("Owner not found");
-    }
-    modelBytes = await downloadBuffer(modelDriveId, owner);
-  } catch (err) {
-    await GeneratedVideo.updateOne(
-      { id: generatedVideoId },
-      { $set: { processing: false } }
-    );
-    logApiError("triggerVideoSwap: download model from Drive", err);
-    return;
-  }
-
   const form = new FormData();
   form.append("model_id", String(modelId));
   form.append("enable_restore", enableRestore ? "1" : "0");
@@ -184,29 +173,18 @@ export async function triggerVideoSwap({
     filename: "model.safetensors",
     contentType: "application/octet-stream",
   });
-  form.append("target_video", video.buffer, {
-    filename: video.originalname || "target.mp4",
-    contentType: video.mimetype || "video/mp4",
+  form.append("target_video", videoBytes, {
+    filename: videoFilename || "target.mp4",
+    contentType: videoMimeType || "video/mp4",
   });
 
-  try {
-    const response = await axios.post(`${INFERENCE_BASE_URL}/swap-remote-video`, form, {
-      headers: form.getHeaders(),
-      responseType: "stream",
-      timeout: 1800000,
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-    });
-    if (response?.data?.resume) {
-      response.data.resume();
-    }
-  } catch (err) {
-    await GeneratedVideo.updateOne(
-      { id: generatedVideoId },
-      { $set: { processing: false } }
-    );
-    logApiError("triggerVideoSwap", err);
-  }
+  const response = await axios.post(`${INFERENCE_BASE_URL}/swap-remote-video`, form, {
+    headers: form.getHeaders(),
+    timeout: 1800000,
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+  });
+  return response.data;
 }
 
 export function enqueueSwapJob(jobId, expressionStrength = 0.85) {
@@ -272,4 +250,134 @@ export async function bootstrapSwapQueue() {
     .sort({ id: 1 })
     .lean();
   queuedJobs.forEach((job) => enqueueSwapJob(job.id));
+}
+
+export function enqueueVideoSwapJob(videoId) {
+  if (!videoSwapQueue.some((item) => item.videoId === videoId)) {
+    videoSwapQueue.push({ videoId });
+  }
+  void processVideoSwapQueue();
+}
+
+async function markVideoFailed(video, err) {
+  const detail = getErrorDetail(err).slice(0, 2000);
+  video.status = "failed";
+  video.processing = false;
+  video.error = detail;
+  video.finished_at = new Date();
+  await video.save();
+  logApiError(`processVideoSwapQueue video ${video.id}`, err);
+}
+
+async function processVideoSwapQueue() {
+  if (videoSwapWorkerActive) {
+    return;
+  }
+  videoSwapWorkerActive = true;
+
+  try {
+    while (videoSwapQueue.length > 0) {
+      const { videoId } = videoSwapQueue.shift();
+      const video = await GeneratedVideo.findOne({ id: videoId });
+      if (!video || video.status !== "queued") {
+        continue;
+      }
+
+      video.status = "processing";
+      video.processing = true;
+      video.error = null;
+      video.started_at = new Date();
+      video.finished_at = null;
+      await video.save();
+
+      try {
+        const owner = await User.findOne({ id: video.owner_id });
+        if (!owner) {
+          throw new Error("Video owner not found");
+        }
+        const model = await FaceModel.findOne({
+          id: video.face_model_id,
+          owner_id: video.owner_id,
+          is_deleted: false,
+        }).lean();
+        if (!model) {
+          throw new Error("Model not found");
+        }
+        if (!video.input_drive_file_id) {
+          throw new Error("Queued video input is missing");
+        }
+
+        const [modelBytes, videoBytes] = await Promise.all([
+          downloadBuffer(model.drive_file_id, owner),
+          downloadBuffer(video.input_drive_file_id, owner),
+        ]);
+
+        const callbackBase = API_BASE_URL || "";
+        if (!callbackBase) {
+          throw new Error("API_BASE_URL is required for background video callbacks");
+        }
+        const callbackUrl = `${callbackBase}/internal/videos/generated/${video.id}/content`;
+        const progressUrl = `${callbackBase}/internal/videos/generated/${video.id}/progress`;
+
+        await triggerVideoSwap({
+          generatedVideoId: video.id,
+          modelBytes,
+          videoBytes,
+          videoFilename: video.filename,
+          videoMimeType: video.input_mime_type || video.mime_type,
+          modelId: video.face_model_id,
+          enableRestore: Boolean(video.enable_restore),
+          expressionStrength: video.expression_strength,
+          callbackUrl,
+          progressUrl,
+          callbackToken: INFERENCE_CALLBACK_TOKEN,
+        });
+
+        const completed = await GeneratedVideo.findOne({ id: video.id });
+        if (completed && completed.status === "processing" && completed.drive_file_id) {
+          completed.status = "done";
+          completed.processing = false;
+          completed.progress_percent = 100;
+          completed.error = null;
+          completed.finished_at = completed.finished_at || new Date();
+          await completed.save();
+        } else if (completed && !completed.drive_file_id && completed.status === "processing") {
+          throw new Error("Inference finished without posting generated video content");
+        }
+      } catch (err) {
+        await markVideoFailed(video, err);
+      }
+    }
+  } finally {
+    videoSwapWorkerActive = false;
+    if (videoSwapQueue.length > 0) {
+      void processVideoSwapQueue();
+    }
+  }
+}
+
+export async function bootstrapVideoSwapQueue() {
+  const queuedVideos = await GeneratedVideo.find({
+    $or: [
+      { status: { $in: ["queued", "processing"] } },
+      { status: { $exists: false }, processing: true },
+    ],
+    drive_file_id: null,
+  })
+    .select({ id: 1, status: 1 })
+    .sort({ id: 1 })
+    .lean();
+
+  await GeneratedVideo.updateMany(
+    {
+      $or: [
+        { status: "processing" },
+        { status: { $exists: false }, processing: true },
+      ],
+      drive_file_id: null,
+    },
+    { $set: { status: "queued", processing: true, started_at: null, error: null } }
+  );
+
+  queuedVideos.forEach((video) => enqueueVideoSwapJob(video.id));
 }

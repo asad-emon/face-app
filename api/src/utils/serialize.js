@@ -44,6 +44,7 @@ export function serializeGeneratedImage(image, options = {}) {
 
 export function serializeGeneratedVideo(video) {
   const hasContent = Boolean(video.drive_file_id);
+  const status = video.status || (video.processing ? "processing" : hasContent ? "done" : "failed");
   return {
     id: video.id,
     owner_id: video.owner_id,
@@ -51,10 +52,16 @@ export function serializeGeneratedVideo(video) {
     filename: video.filename,
     mime_type: video.mime_type || "video/mp4",
     processing: Boolean(video.processing),
+    status,
+    error: video.error || null,
     total_frames: Number(video.total_frames) || 0,
     processed_frames: Number(video.processed_frames) || 0,
     progress_percent: Number(video.progress_percent) || 0,
     has_content: hasContent,
+    started_at: video.started_at || null,
+    finished_at: video.finished_at || null,
+    created_at: video.created_at || null,
+    updated_at: video.updated_at || null,
   };
 }
 

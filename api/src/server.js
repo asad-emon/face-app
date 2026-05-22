@@ -3,7 +3,7 @@ import cors from "cors";
 import { initDb, SwapJob } from "./db.js";
 import { CLIENT_ORIGIN, PORT } from "./config.js";
 import { logApiError } from "./utils/logging.js";
-import { bootstrapSwapQueue } from "./services/swapService.js";
+import { bootstrapSwapQueue, bootstrapVideoSwapQueue } from "./services/swapService.js";
 import authRoutes from "./routes/auth.js";
 import systemRoutes from "./routes/system.js";
 import modelRoutes from "./routes/models.js";
@@ -45,6 +45,7 @@ async function start() {
       { $set: { status: "queued", started_at: null, error: null } }
     );
     await bootstrapSwapQueue();
+    await bootstrapVideoSwapQueue();
 
     app.listen(PORT, () => {
       console.log(`API server listening on ${PORT}`);

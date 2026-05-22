@@ -7,7 +7,6 @@ import {
   buildVideoFileFromUrl,
   getDefaultVersionId,
   groupByPerson,
-  pollGeneratedVideoContent,
   wait,
 } from './swapUtils.js';
 
@@ -24,8 +23,8 @@ export function SwapProvider({ children }) {
   const [enableRestore, setEnableRestore] = useState(false);
   const [expressionStrength, setExpressionStrength] = useState(0.85);
   const [busy, setBusy] = useState(false);
-  const [videoFile, setVideoFile] = useState(null);
-  const [videoPreviewUrl, setVideoPreviewUrl] = useState('');
+  const [videoFiles, setVideoFiles] = useState([]);
+  const [videoPreviewItems, setVideoPreviewItems] = useState([]);
   const [videoResultUrl, setVideoResultUrl] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [videoBusy, setVideoBusy] = useState(false);
@@ -57,14 +56,12 @@ export function SwapProvider({ children }) {
   useEffect(() => {
     return () => {
       targetImagesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      if (videoPreviewUrl) {
-        URL.revokeObjectURL(videoPreviewUrl);
-      }
+      videoPreviewItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       if (videoResultUrl) {
         URL.revokeObjectURL(videoResultUrl);
       }
     };
-  }, [videoPreviewUrl, videoResultUrl]);
+  }, [videoPreviewItems, videoResultUrl]);
 
   const modelGroups = useMemo(() => groupByPerson(models), [models]);
   const selectedGroup = useMemo(
@@ -209,25 +206,33 @@ export function SwapProvider({ children }) {
   }, []);
 
   const setVideoSelection = useCallback(
-    (file) => {
-      if (videoPreviewUrl) {
-        URL.revokeObjectURL(videoPreviewUrl);
-      }
+    (files) => {
+      videoPreviewItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       if (videoResultUrl) {
         URL.revokeObjectURL(videoResultUrl);
         setVideoResultUrl('');
       }
       setVideoError('');
       setVideoProgress(0);
-      if (!file) {
-        setVideoFile(null);
-        setVideoPreviewUrl('');
+      const nextFiles = files
+        ? (Array.isArray(files) ? files : Array.from(files instanceof FileList ? files : [files]))
+            .filter(Boolean)
+        : [];
+      if (nextFiles.length === 0) {
+        setVideoFiles([]);
+        setVideoPreviewItems([]);
         return;
       }
-      setVideoFile(file);
-      setVideoPreviewUrl(URL.createObjectURL(file));
+      setVideoFiles(nextFiles);
+      setVideoPreviewItems(
+        nextFiles.map((file, index) => ({
+          id: `${Date.now()}-${index}-${file.name}`,
+          file,
+          previewUrl: URL.createObjectURL(file),
+        }))
+      );
     },
-    [videoPreviewUrl, videoResultUrl]
+    [videoPreviewItems, videoResultUrl]
   );
 
   const clearVideoInput = useCallback(() => {
@@ -457,8 +462,8 @@ export function SwapProvider({ children }) {
       alert('Please select a person/version first.');
       return;
     }
-    if (!videoFile && !videoUrl) {
-      alert('Please select a target video or paste a video URL first.');
+    if (videoFiles.length === 0 && !videoUrl) {
+      alert('Please select target videos or paste a video URL first.');
       return;
     }
 
@@ -467,14 +472,15 @@ export function SwapProvider({ children }) {
     setVideoProgress(0);
 
     try {
-      let fileToUpload = videoFile;
-      if (!fileToUpload && videoUrl) {
-        fileToUpload = await buildVideoFileFromUrl(videoUrl.trim());
-        setVideoSelection(fileToUpload);
+      let filesToUpload = videoFiles;
+      if (filesToUpload.length === 0 && videoUrl) {
+        const remoteFile = await buildVideoFileFromUrl(videoUrl.trim());
+        filesToUpload = [remoteFile];
+        setVideoSelection(remoteFile);
       }
 
       const formData = new FormData();
-      formData.append('file', fileToUpload);
+      filesToUpload.forEach((file) => formData.append('files', file));
       formData.append('model_id', selectedModelId);
       formData.append('enable_restore', enableRestore ? '1' : '0');
       formData.append('expression_strength', String(expressionStrength));
@@ -491,25 +497,16 @@ export function SwapProvider({ children }) {
       }
 
       const payload = await response.json().catch(() => null);
-      const generatedVideoId = Number(payload?.id || payload?.generated_video_id);
-      if (!generatedVideoId) {
-        throw new Error('Video swap did not return a generated id');
-      }
-
-      const outputBlob = await pollGeneratedVideoContent(generatedVideoId, token, {
-        onProgress: (percent) => setVideoProgress(percent),
-      });
-      if (videoResultUrl) {
-        URL.revokeObjectURL(videoResultUrl);
-      }
-      setVideoResultUrl(URL.createObjectURL(outputBlob));
+      const total = Number(payload?.total) || (Array.isArray(payload?.items) ? payload.items.length : 1);
       setVideoProgress(100);
+      window.dispatchEvent(new CustomEvent('gallery:open', { detail: { type: 'videos' } }));
+      alert(`Queued ${total} video${total === 1 ? '' : 's'} for processing. Check the gallery for status.`);
     } catch (error) {
       setVideoError(error.message || 'Unknown error');
     } finally {
       setVideoBusy(false);
     }
-  }, [selectedModelId, videoFile, videoUrl, enableRestore, expressionStrength, token, setVideoSelection, videoResultUrl]);
+  }, [selectedModelId, videoFiles, videoUrl, enableRestore, expressionStrength, token, setVideoSelection]);
 
   const processedCount = useMemo(
     () => targetImages.filter((item) => item.status === 'done').length,
@@ -560,8 +557,10 @@ export function SwapProvider({ children }) {
       processedCount,
       failedCount,
       pendingCount,
-      videoFile,
-      videoPreviewUrl,
+      videoFile: videoFiles[0] || null,
+      videoFiles,
+      videoPreviewUrl: videoPreviewItems[0]?.previewUrl || '',
+      videoPreviewItems,
       videoResultUrl,
       videoUrl,
       setVideoUrl,
@@ -609,8 +608,8 @@ export function SwapProvider({ children }) {
       processedCount,
       failedCount,
       pendingCount,
-      videoFile,
-      videoPreviewUrl,
+      videoFiles,
+      videoPreviewItems,
       videoResultUrl,
       videoUrl,
       videoBusy,

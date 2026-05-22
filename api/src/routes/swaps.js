@@ -1,13 +1,13 @@
 import express from "express";
 import { FaceModel, GeneratedVideo, InputImage, SwapJob } from "../db.js";
-import { INFERENCE_BASE_URL, INFERENCE_CALLBACK_TOKEN, SWAP_QUEUE_POLL_LIMIT } from "../config.js";
+import { API_BASE_URL, INFERENCE_BASE_URL, SWAP_QUEUE_POLL_LIMIT } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
-import { getApiBaseUrl } from "../utils/http.js";
 import { getErrorDetail, parseBoolean } from "../utils/parsing.js";
 import { serializeGeneratedVideo, serializeSwapJob } from "../utils/serialize.js";
-import { enqueueSwapJob, runSwapAndStore, triggerVideoSwap } from "../services/swapService.js";
+import { uploadBuffer, deleteFile } from "../services/driveStorage.js";
+import { enqueueSwapJob, enqueueVideoSwapJob, runSwapAndStore } from "../services/swapService.js";
 
 const router = express.Router();
 
@@ -130,7 +130,14 @@ router.post("/swap", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) => {
+router.post(
+  "/swap-video",
+  requireAuth,
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "files", maxCount: 20 },
+  ]),
+  async (req, res) => {
   const modelId = Number(req.query.model_id || req.body.model_id);
   const enableRestore = parseBoolean(
     req.query.enable_restore ?? req.body.enable_restore,
@@ -139,13 +146,16 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
   const expressionStrength = Math.max(0, Math.min(1, Number(
     req.query.expression_strength ?? req.body.expression_strength ?? 0.85
   ))) || 0.85;
-  const video = req.file;
+  const videos = [
+    ...(Array.isArray(req.files?.file) ? req.files.file : []),
+    ...(Array.isArray(req.files?.files) ? req.files.files : []),
+  ];
 
   if (!modelId) {
     return res.status(400).json({ detail: "model_id is required" });
   }
-  if (!video) {
-    return res.status(400).json({ detail: "No video uploaded" });
+  if (videos.length === 0) {
+    return res.status(400).json({ detail: "No videos uploaded" });
   }
 
   const model = await FaceModel.findOne({
@@ -162,49 +172,67 @@ router.post("/swap-video", requireAuth, upload.single("file"), async (req, res) 
   if (!INFERENCE_BASE_URL) {
     return res.status(500).json({ detail: "INFERENCE_BASE_URL is not configured" });
   }
+  if (!API_BASE_URL) {
+    return res.status(500).json({ detail: "API_BASE_URL is required for background video processing" });
+  }
 
-  let generatedVideo = null;
+  const created = [];
+  const uploadedInputDriveIds = [];
   try {
-    generatedVideo = await GeneratedVideo.create({
-      filename: video.originalname || "target.mp4",
-      mime_type: video.mimetype || "video/mp4",
-      processing: true,
-      total_frames: 0,
-      processed_frames: 0,
-      progress_percent: 0,
-      drive_file_id: null,
-      owner_id: req.user.id,
-      face_model_id: modelId,
-    });
+    for (const video of videos) {
+      const inputDrive = await uploadBuffer({
+        buffer: video.buffer,
+        filename: `video-input-${req.user.id}-${modelId}-${Date.now()}-${video.originalname || "target.mp4"}`,
+        mimeType: video.mimetype || "video/mp4",
+        authUser: req.user,
+      });
+      uploadedInputDriveIds.push(inputDrive.drive_file_id);
 
-    const apiBaseUrl = getApiBaseUrl(req);
-    if (!apiBaseUrl) {
-      return res.status(500).json({ detail: "API_BASE_URL is not configured" });
+      const generatedVideo = await GeneratedVideo.create({
+        filename: video.originalname || "target.mp4",
+        mime_type: "video/mp4",
+        processing: true,
+        status: "queued",
+        error: null,
+        total_frames: 0,
+        processed_frames: 0,
+        progress_percent: 0,
+        drive_file_id: null,
+        input_drive_file_id: inputDrive.drive_file_id,
+        input_mime_type: video.mimetype || "video/mp4",
+        input_size: inputDrive.size,
+        owner_id: req.user.id,
+        face_model_id: modelId,
+        enable_restore: enableRestore,
+        expression_strength: expressionStrength,
+      });
+      created.push(generatedVideo);
     }
-    const callbackUrl = `${apiBaseUrl}/internal/videos/generated/${generatedVideo.id}/content`;
-    const progressUrl = `${apiBaseUrl}/internal/videos/generated/${generatedVideo.id}/progress`;
 
-    void triggerVideoSwap({
-      generatedVideoId: generatedVideo.id,
-      ownerId: req.user.id,
-      modelDriveId: model.drive_file_id,
-      video,
-      modelId,
-      enableRestore,
-      expressionStrength,
-      callbackUrl,
-      progressUrl,
-      callbackToken: INFERENCE_CALLBACK_TOKEN,
-    });
+    created.forEach((video) => enqueueVideoSwapJob(video.id));
 
-    return res.status(202).json(serializeGeneratedVideo(generatedVideo));
+    const payload = {
+      items: created.map(serializeGeneratedVideo),
+      total: created.length,
+    };
+    if (created.length === 1) {
+      return res.status(202).json({ ...serializeGeneratedVideo(created[0]), ...payload });
+    }
+    return res.status(202).json(payload);
   } catch (err) {
-    if (generatedVideo) {
-      await GeneratedVideo.updateOne(
-        { id: generatedVideo.id, owner_id: req.user.id },
-        { $set: { processing: false } }
-      );
+    if (created.length > 0) {
+      await GeneratedVideo.deleteMany({
+        owner_id: req.user.id,
+        id: { $in: created.map((video) => video.id) },
+      });
     }
+    await Promise.all(
+      uploadedInputDriveIds.map((driveId) =>
+        deleteFile(driveId, req.user).catch((deleteErr) =>
+          logApiError(`POST /swap-video cleanup ${driveId}`, deleteErr)
+        )
+      )
+    );
     logApiError("POST /swap-video", err);
     const detail = err.response?.data?.detail || err.message;
     return res.status(502).json({ detail: `Video swap service failed: ${detail}` });

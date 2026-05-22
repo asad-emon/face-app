@@ -66,11 +66,14 @@ router.post(
     video.filename = filename;
     video.mime_type = mimeType;
     video.processing = false;
+    video.status = "done";
+    video.error = null;
     video.total_frames = totalFrames || 0;
     video.processed_frames = processedFrames || 0;
     video.progress_percent = progressPercent;
     video.drive_file_id = driveResult.drive_file_id;
     video.size = driveResult.size;
+    video.finished_at = new Date();
     await video.save();
 
     if (previousDriveId && previousDriveId !== driveResult.drive_file_id) {

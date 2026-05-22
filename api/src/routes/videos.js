@@ -48,6 +48,8 @@ router.get("/videos/generated/:id/status", requireAuth, async (req, res) => {
   return res.json({
     id: video.id,
     processing: Boolean(video.processing),
+    status: video.status || (video.processing ? "processing" : video.drive_file_id ? "done" : "failed"),
+    error: video.error || null,
     total_frames: Number(video.total_frames) || 0,
     processed_frames: Number(video.processed_frames) || 0,
     progress_percent: Number(video.progress_percent) || 0,
@@ -145,6 +147,11 @@ router.delete("/videos/generated/:id", requireAuth, async (req, res) => {
       logApiError(`DELETE /videos/generated/:id drive ${existing.drive_file_id}`, err)
     );
   }
+  if (existing.input_drive_file_id) {
+    await deleteFile(existing.input_drive_file_id, req.user).catch((err) =>
+      logApiError(`DELETE /videos/generated/:id input drive ${existing.input_drive_file_id}`, err)
+    );
+  }
 
   return res.json({ deleted: result.deletedCount });
 });
@@ -165,7 +172,7 @@ router.delete("/videos/generated", requireAuth, async (req, res) => {
     owner_id: req.user.id,
     id: { $in: uniqueIds },
   })
-    .select({ drive_file_id: 1 })
+    .select({ drive_file_id: 1, input_drive_file_id: 1 })
     .lean();
 
   const result = await GeneratedVideo.deleteMany({
@@ -173,7 +180,10 @@ router.delete("/videos/generated", requireAuth, async (req, res) => {
     id: { $in: uniqueIds },
   });
 
-  await deleteManyFiles(existing.map((v) => v.drive_file_id), req.user);
+  await deleteManyFiles(
+    existing.flatMap((v) => [v.drive_file_id, v.input_drive_file_id]),
+    req.user
+  );
 
   return res.json({ deleted: result.deletedCount || 0 });
 });

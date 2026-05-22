@@ -5,7 +5,7 @@ import { useSwap } from '../SwapContext.jsx';
 export default function VideoSwapSection() {
   const {
     selectedModelId,
-    videoFile,
+    videoFiles,
     videoUrl,
     setVideoUrl,
     setVideoSelection,
@@ -14,7 +14,7 @@ export default function VideoSwapSection() {
     videoBusy,
     videoError,
     videoProgress,
-    videoPreviewUrl,
+    videoPreviewItems,
     videoResultUrl,
     controlsDisabled,
   } = useSwap();
@@ -32,7 +32,7 @@ export default function VideoSwapSection() {
           Video Face Swap
         </Text>
         <Text fontSize="sm" color="gray.500">
-          Upload one target video and run swap with the selected model version.
+          Upload target videos and run swaps with the selected model version.
         </Text>
       </Box>
 
@@ -43,19 +43,20 @@ export default function VideoSwapSection() {
             hidden
             type="file"
             accept="video/*"
+            multiple
             onChange={(event) => {
-              const file = event.target.files?.[0] || null;
-              setVideoSelection(file);
-              if (file) {
+              const files = event.target.files;
+              setVideoSelection(files);
+              if (files && files.length > 0) {
                 setVideoUrl('');
               }
               event.target.value = '';
             }}
           />
         </Button>
-        {videoFile && (
+        {videoFiles.length > 0 && (
           <Text fontSize="sm" color="gray.500" mt={2}>
-            Selected: {videoFile.name}
+            Selected: {videoFiles.length} video{videoFiles.length === 1 ? '' : 's'}
           </Text>
         )}
       </Box>
@@ -66,7 +67,7 @@ export default function VideoSwapSection() {
         onChange={(event) => {
           setVideoUrl(event.target.value);
           if (event.target.value) {
-            setVideoSelection(null);
+            setVideoSelection([]);
           }
         }}
         isDisabled={controlsDisabled}
@@ -76,16 +77,16 @@ export default function VideoSwapSection() {
         <Button
           colorScheme="brand"
           onClick={handleVideoSwap}
-          isDisabled={controlsDisabled || !selectedModelId || (!videoFile && !videoUrl)}
+          isDisabled={controlsDisabled || !selectedModelId || (videoFiles.length === 0 && !videoUrl)}
         >
-          Process Video
+          Process Videos
         </Button>
         <Button
           variant="outline"
           onClick={clearVideoInput}
-          isDisabled={controlsDisabled || (!videoFile && !videoUrl)}
+          isDisabled={controlsDisabled || (videoFiles.length === 0 && !videoUrl)}
         >
-          Clear Video
+          Clear Videos
         </Button>
       </Box>
 
@@ -93,7 +94,7 @@ export default function VideoSwapSection() {
         <Box>
           <Progress value={Math.min(100, videoProgress)} />
           <Text fontSize="sm" color="gray.500" mt={2}>
-            Processing video... {Math.round(videoProgress)}%
+            Queueing video jobs... {Math.round(videoProgress)}%
           </Text>
         </Box>
       )}
@@ -107,13 +108,20 @@ export default function VideoSwapSection() {
         </Alert>
       )}
 
-      {videoPreviewUrl && (
-        <Box>
+      {videoPreviewItems.length > 0 && (
+        <Stack spacing={3}>
           <Text fontSize="sm" color="gray.500" mb={2}>
-            Input video
+            Input videos
           </Text>
-          <video src={videoPreviewUrl} controls style={{ maxWidth: '100%' }} />
-        </Box>
+          {videoPreviewItems.map((item) => (
+            <Box key={item.id}>
+              <Text fontSize="sm" color="gray.500" mb={2} noOfLines={1}>
+                {item.file.name}
+              </Text>
+              <video src={item.previewUrl} controls style={{ maxWidth: '100%' }} />
+            </Box>
+          ))}
+        </Stack>
       )}
 
       {videoResultUrl && (

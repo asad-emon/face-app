@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
+  Badge,
   Button,
   Checkbox,
   Divider,
@@ -13,6 +14,7 @@ import {
   ModalCloseButton,
   ModalContent,
   ModalOverlay,
+  Progress,
   Select,
   SimpleGrid,
   Stack,
@@ -399,11 +401,39 @@ export default function ImageGallery({ isActive = false }) {
     setIsPreviewOpen(true);
   };
 
+  const videoStatusLabel = (video) => {
+    const status = video.status || (video.processing ? 'processing' : video.has_content ? 'done' : 'failed');
+    if (status === 'queued') return 'Queued';
+    if (status === 'processing') return 'Processing';
+    if (status === 'done') return 'Done';
+    if (status === 'failed') return 'Failed';
+    return status;
+  };
+
+  const videoStatusColor = (video) => {
+    const status = video.status || (video.processing ? 'processing' : video.has_content ? 'done' : 'failed');
+    if (status === 'done') return 'green';
+    if (status === 'failed') return 'red';
+    if (status === 'queued' || status === 'processing') return 'yellow';
+    return 'gray';
+  };
+
   useEffect(() => {
     if (token && isActive) {
       fetchGallery();
     }
   }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize]);
+
+  useEffect(() => {
+    if (!token || !isActive || activeType !== 'videos') return undefined;
+    if (!videos.some((video) => video.processing || video.status === 'queued' || video.status === 'processing')) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      fetchGallery();
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [token, isActive, activeType, videos]);
 
   useEffect(() => {
     if (!isPreviewOpen) return undefined;
@@ -423,6 +453,12 @@ export default function ImageGallery({ isActive = false }) {
 
   useEffect(() => {
     const handler = async (event) => {
+      if (event?.detail?.type === 'videos') {
+        setActiveType('videos');
+        setVideoPage(1);
+        await fetchGallery({ videoPage: 1 });
+        return;
+      }
       const imageId = Number(event?.detail?.imageId);
       if (!imageId) return;
       try {
@@ -683,6 +719,7 @@ export default function ImageGallery({ isActive = false }) {
                             <Text fontSize="sm" noOfLines={1}>
                               #{video.id} {video.filename}
                             </Text>
+                            <Badge colorScheme={videoStatusColor(video)}>{videoStatusLabel(video)}</Badge>
                             <Checkbox
                               isChecked={selectedVideoIds.includes(video.id)}
                               onChange={() =>
@@ -694,9 +731,20 @@ export default function ImageGallery({ isActive = false }) {
                           </HStack>
                           {videoSources[video.id] ? (
                             <Box as="video" src={videoSources[video.id]} controls w="100%" h="200px" />
-                          ) : video.processing ? (
+                          ) : video.status === 'queued' ? (
                             <Text color="gray.500" fontSize="sm">
-                              Processing{Number.isFinite(video.progress_percent) ? ` (${video.progress_percent}%)` : ''}.
+                              Waiting for the background worker.
+                            </Text>
+                          ) : video.processing ? (
+                            <Box>
+                              <Progress value={Math.min(100, Number(video.progress_percent) || 0)} />
+                              <Text color="gray.500" fontSize="sm" mt={2}>
+                                Processing{Number.isFinite(video.progress_percent) ? ` (${video.progress_percent}%)` : ''}.
+                              </Text>
+                            </Box>
+                          ) : video.status === 'failed' ? (
+                            <Text color="red.300" fontSize="sm">
+                              {video.error || 'Video processing failed.'}
                             </Text>
                           ) : !video.has_content ? (
                             <Text color="gray.500" fontSize="sm">
@@ -709,9 +757,6 @@ export default function ImageGallery({ isActive = false }) {
                           )}
                           <Text fontSize="sm" color="gray.500">
                             Model: {modelLabel(video.face_model_id)}
-                          </Text>
-                          <Text fontSize="sm" color="gray.500">
-                            Processing: {video.processing ? 'Yes' : 'No'}
                           </Text>
                           <HStack spacing={2}>
                             <Button

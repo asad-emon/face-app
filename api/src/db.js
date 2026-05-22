@@ -96,15 +96,28 @@ const generatedVideoSchema = new Schema(
     filename: { type: String, required: true, default: "generated.mp4" },
     mime_type: { type: String, required: true, default: "video/mp4" },
     processing: { type: Boolean, required: true, default: true },
+    status: { type: String, required: true, default: "queued", index: true },
+    error: { type: String, default: null },
     total_frames: { type: Number, required: true, default: 0 },
     processed_frames: { type: Number, required: true, default: 0 },
     progress_percent: { type: Number, required: true, default: 0 },
     drive_file_id: { type: String, default: null },
+    input_drive_file_id: { type: String, default: null },
+    input_mime_type: { type: String, default: "video/mp4" },
+    input_size: { type: Number, default: 0 },
     size: { type: Number, default: 0 },
     owner_id: { type: Number, required: true, index: true },
     face_model_id: { type: Number, required: true, default: 0, index: true },
+    enable_restore: { type: Boolean, required: true, default: false },
+    expression_strength: { type: Number, required: true, default: 0.85 },
+    started_at: { type: Date, default: null },
+    finished_at: { type: Date, default: null },
   },
-  { collection: "generated_videos", versionKey: false }
+  {
+    collection: "generated_videos",
+    versionKey: false,
+    timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
+  }
 );
 attachAutoIncrement(generatedVideoSchema, "generated_videos");
 
