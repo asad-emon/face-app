@@ -1,6 +1,6 @@
 import express from "express";
 import { FaceModel, GeneratedVideo, InputImage, SwapJob } from "../db.js";
-import { API_BASE_URL, INFERENCE_BASE_URL, SWAP_QUEUE_POLL_LIMIT } from "../config.js";
+import { API_BASE_URL, HF_SOURCE_SPACE_ID, HF_TOKEN, INFERENCE_BASE_URL, SWAP_QUEUE_POLL_LIMIT } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
@@ -173,10 +173,10 @@ router.post(
     return res.status(404).json({ detail: "Model not found" });
   }
 
-  if (!INFERENCE_BASE_URL) {
-    return res.status(500).json({ detail: "INFERENCE_BASE_URL is not configured" });
+  if (!INFERENCE_BASE_URL && !(HF_TOKEN && HF_SOURCE_SPACE_ID)) {
+    return res.status(500).json({ detail: "INFERENCE_BASE_URL or HF_TOKEN + HF_SOURCE_SPACE_ID is required" });
   }
-  if (!API_BASE_URL) {
+  if (!API_BASE_URL && !(HF_TOKEN && HF_SOURCE_SPACE_ID)) {
     return res.status(500).json({ detail: "API_BASE_URL is required for background video processing" });
   }
 

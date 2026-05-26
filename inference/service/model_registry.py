@@ -3,7 +3,7 @@ from threading import Lock
 from typing import Optional, Tuple
 
 import onnxruntime as ort
-from huggingface_hub import hf_hub_download
+from huggingface_hub import _CACHED_NO_EXIST, hf_hub_download, try_to_load_from_cache
 from insightface import model_zoo
 from insightface.app import FaceAnalysis
 
@@ -25,24 +25,34 @@ class ModelRegistry:
         self._current_det_size: Optional[int] = None
 
     def _download_model(self, filename: str) -> str:
-        local_path = os.path.join(self._settings.local_model_dir, filename)
-        if os.path.exists(local_path):
+        cached_path = try_to_load_from_cache(
+            repo_id=self._settings.model_repo,
+            filename=filename,
+            cache_dir=self._settings.local_model_dir,
+        )
+        if isinstance(cached_path, str):
             logger.info(
                 "model_cache_hit",
                 extra={
                     "event": "model_cache_hit",
                     "model_filename": filename,
-                    "path": local_path,
+                    "path": cached_path,
                 },
             )
-            return local_path
+            return cached_path
+
+        if cached_path is _CACHED_NO_EXIST:
+            raise FileNotFoundError(
+                f"Model file '{filename}' is cached as missing from "
+                f"'{self._settings.model_repo}'."
+            )
 
         os.makedirs(self._settings.local_model_dir, exist_ok=True)
         with timed_log(logger, "model_download", model_filename=filename):
             return hf_hub_download(
                 repo_id=self._settings.model_repo,
                 filename=filename,
-                local_dir=self._settings.local_model_dir,
+                cache_dir=self._settings.local_model_dir,
             )
 
     def _initialize_models(self) -> ModelTuple:
