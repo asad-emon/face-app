@@ -5,23 +5,10 @@ import {
   INFERENCE_BASE_URL,
   INFERENCE_CALLBACK_TOKEN,
   API_BASE_URL,
-  HF_SOURCE_SPACE_ID,
-  HF_SPACE_DELETE_AFTER_JOB,
-  HF_SPACE_DUPLICATE_OWNER,
-  HF_SPACE_HARDWARE,
-  HF_SPACE_NAME_PREFIX,
-  HF_SPACE_READY_POLL_MS,
-  HF_SPACE_READY_TIMEOUT_MS,
-  HF_SPACE_SECRETS_JSON,
-  HF_SPACE_SLEEP_TIME,
-  HF_SPACE_STORAGE,
-  HF_SPACE_VARIABLES_JSON,
-  HF_SPACE_VISIBILITY,
-  HF_TOKEN,
-  HF_VIDEO_SPACE_MAX_PARALLEL,
   SWAP_MAX_RETRIES,
   SWAP_RETRY_DELAY_MS,
   SWAP_TIMEOUT_MS,
+  VIDEO_SWAP_TIMEOUT_MS,
 } from "../config.js";
 import { getErrorDetail } from "../utils/parsing.js";
 import { logApiError } from "../utils/logging.js";
@@ -34,170 +21,10 @@ import {
 const swapQueue = [];
 let swapWorkerActive = false;
 const videoSwapQueue = [];
-const activeVideoSwapJobs = new Set();
-
-const HF_HUB_URL = "https://huggingface.co";
+let videoSwapWorkerActive = false;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function hfVideoSpacesEnabled() {
-  return Boolean(HF_TOKEN && HF_SOURCE_SPACE_ID);
-}
-
-function hfHeaders(extra = {}) {
-  return {
-    Authorization: `Bearer ${HF_TOKEN}`,
-    ...extra,
-  };
-}
-
-function parseJsonArray(rawValue, label) {
-  if (!rawValue) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(rawValue);
-    if (!Array.isArray(parsed)) {
-      throw new Error(`${label} must be a JSON array`);
-    }
-    return parsed;
-  } catch (err) {
-    throw new Error(`Invalid ${label}: ${err.message}`);
-  }
-}
-
-function safeSpaceName(value) {
-  const safe = String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 96);
-  return safe || `video-${Date.now().toString(36)}`;
-}
-
-function deriveSpaceAppUrl(repoId) {
-  const [owner, name] = String(repoId).split("/");
-  const subdomain = `${owner || ""}-${name || ""}`
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return `https://${subdomain}.hf.space`;
-}
-
-async function getHfUsername() {
-  const response = await axios.get(`${HF_HUB_URL}/api/whoami-v2`, {
-    headers: hfHeaders(),
-    timeout: 30000,
-  });
-  const name = response.data?.name;
-  if (!name) {
-    throw new Error("Unable to resolve Hugging Face token owner");
-  }
-  return name;
-}
-
-async function getSpaceInfo(repoId) {
-  const response = await axios.get(`${HF_HUB_URL}/api/spaces/${repoId}`, {
-    headers: hfHeaders(),
-    timeout: 30000,
-  });
-  return response.data || {};
-}
-
-async function duplicateVideoSpace(videoId) {
-  const owner = HF_SPACE_DUPLICATE_OWNER || (await getHfUsername());
-  const targetName = safeSpaceName(`${HF_SPACE_NAME_PREFIX}-${videoId}-${Date.now().toString(36)}`);
-  const targetRepoId = `${owner}/${targetName}`;
-  const payload = {
-    repository: targetRepoId,
-  };
-
-  if (HF_SPACE_VISIBILITY) {
-    payload.visibility = HF_SPACE_VISIBILITY;
-  }
-  if (HF_SPACE_HARDWARE) {
-    payload.hardware = HF_SPACE_HARDWARE;
-  }
-  if (HF_SPACE_STORAGE) {
-    payload.storageTier = HF_SPACE_STORAGE;
-  }
-  if (Number.isFinite(HF_SPACE_SLEEP_TIME) && HF_SPACE_HARDWARE !== "cpu-basic") {
-    payload.sleepTimeSeconds = HF_SPACE_SLEEP_TIME;
-  }
-  const secrets = parseJsonArray(HF_SPACE_SECRETS_JSON, "HF_SPACE_SECRETS_JSON");
-  const variables = parseJsonArray(HF_SPACE_VARIABLES_JSON, "HF_SPACE_VARIABLES_JSON");
-  if (secrets) {
-    payload.secrets = secrets;
-  }
-  if (variables) {
-    payload.variables = variables;
-  }
-
-  const response = await axios.post(
-    `${HF_HUB_URL}/api/spaces/${HF_SOURCE_SPACE_ID}/duplicate`,
-    payload,
-    {
-      headers: hfHeaders(),
-      timeout: 120000,
-    }
-  );
-
-  return {
-    repoId: targetRepoId,
-    repoUrl: response.data?.url || `${HF_HUB_URL}/spaces/${targetRepoId}`,
-  };
-}
-
-async function waitForSpaceReady(repoId) {
-  const deadline = Date.now() + HF_SPACE_READY_TIMEOUT_MS;
-  let appUrl = deriveSpaceAppUrl(repoId);
-  let lastError = null;
-
-  while (Date.now() < deadline) {
-    try {
-      const info = await getSpaceInfo(repoId);
-      if (info?.subdomain) {
-        appUrl = `https://${info.subdomain}.hf.space`;
-      }
-      await axios.get(`${appUrl}/docs`, {
-        headers: hfHeaders(),
-        timeout: 15000,
-        validateStatus: (status) => status >= 200 && status < 500,
-      }).then((response) => {
-        if (response.status >= 200 && response.status < 400) {
-          return response;
-        }
-        throw new Error(`Space app returned ${response.status}`);
-      });
-      return appUrl;
-    } catch (err) {
-      lastError = err;
-      await sleep(HF_SPACE_READY_POLL_MS);
-    }
-  }
-
-  throw new Error(`Timed out waiting for duplicated Space ${repoId}: ${getErrorDetail(lastError)}`);
-}
-
-async function deleteHfSpace(repoId) {
-  if (!repoId || !HF_SPACE_DELETE_AFTER_JOB) {
-    return;
-  }
-  const [organization, name] = String(repoId).split("/");
-  if (!organization || !name) {
-    return;
-  }
-  await axios.delete(`${HF_HUB_URL}/api/repos/delete`, {
-    headers: hfHeaders(),
-    data: {
-      type: "space",
-      name,
-      organization,
-    },
-    timeout: 30000,
-  });
 }
 
 function shouldRetrySwapRequest(err) {
@@ -327,8 +154,6 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
 
 export async function triggerVideoSwap({
   generatedVideoId,
-  inferenceBaseUrl,
-  authorizationToken,
   modelBytes,
   videoBytes,
   videoFilename,
@@ -370,19 +195,13 @@ export async function triggerVideoSwap({
     contentType: videoMimeType || "video/mp4",
   });
 
-  const requestHeaders = form.getHeaders();
-  if (authorizationToken) {
-    requestHeaders.Authorization = `Bearer ${authorizationToken}`;
-  }
-
-  const response = await axios.post(`${inferenceBaseUrl || INFERENCE_BASE_URL}/swap-remote-video`, form, {
-    headers: requestHeaders,
-    responseType: callbackUrl ? "json" : "arraybuffer",
-    timeout: 1800000,
+  const response = await axios.post(`${INFERENCE_BASE_URL}/swap-remote-video`, form, {
+    headers: form.getHeaders(),
+    timeout: VIDEO_SWAP_TIMEOUT_MS,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
   });
-  return callbackUrl ? response.data : Buffer.from(response.data);
+  return response.data;
 }
 
 export function enqueueSwapJob(jobId, expressionStrength = 0.85) {
@@ -455,7 +274,7 @@ export function enqueueVideoSwapJob(videoId) {
   if (!videoSwapQueue.some((item) => item.videoId === videoId)) {
     videoSwapQueue.push({ videoId });
   }
-  drainVideoSwapQueue();
+  void drainVideoSwapQueue();
 }
 
 async function markVideoFailed(video, err) {
@@ -468,21 +287,22 @@ async function markVideoFailed(video, err) {
   logApiError(`processVideoSwapQueue video ${video.id}`, err);
 }
 
-function canStartMoreVideoJobs() {
-  return HF_VIDEO_SPACE_MAX_PARALLEL === 0 || activeVideoSwapJobs.size < HF_VIDEO_SPACE_MAX_PARALLEL;
-}
+async function drainVideoSwapQueue() {
+  if (videoSwapWorkerActive) {
+    return;
+  }
+  videoSwapWorkerActive = true;
 
-function drainVideoSwapQueue() {
-  while (videoSwapQueue.length > 0 && canStartMoreVideoJobs()) {
-    const { videoId } = videoSwapQueue.shift();
-    if (activeVideoSwapJobs.has(videoId)) {
-      continue;
+  try {
+    while (videoSwapQueue.length > 0) {
+      const { videoId } = videoSwapQueue.shift();
+      await processVideoSwapJob(videoId);
     }
-    activeVideoSwapJobs.add(videoId);
-    void processVideoSwapJob(videoId).finally(() => {
-      activeVideoSwapJobs.delete(videoId);
-      drainVideoSwapQueue();
-    });
+  } finally {
+    videoSwapWorkerActive = false;
+    if (videoSwapQueue.length > 0) {
+      void drainVideoSwapQueue();
+    }
   }
 }
 
@@ -498,8 +318,6 @@ async function processVideoSwapJob(videoId) {
   video.started_at = new Date();
   video.finished_at = null;
   await video.save();
-
-  let duplicatedSpaceId = null;
 
   try {
     const owner = await User.findOne({ id: video.owner_id });
@@ -523,42 +341,19 @@ async function processVideoSwapJob(videoId) {
       downloadBuffer(video.input_drive_file_id, owner),
     ]);
 
-    let inferenceBaseUrl = INFERENCE_BASE_URL;
-    let authorizationToken = null;
-    const useHfSpace = hfVideoSpacesEnabled();
-    if (useHfSpace) {
-      const duplicated = await duplicateVideoSpace(video.id);
-      duplicatedSpaceId = duplicated.repoId;
-      video.hf_space_id = duplicated.repoId;
-      video.hf_space_url = duplicated.repoUrl;
-      video.progress_percent = Math.max(Number(video.progress_percent) || 0, 1);
-      await video.save();
-      inferenceBaseUrl = await waitForSpaceReady(duplicated.repoId);
-      video.hf_space_url = inferenceBaseUrl;
-      video.progress_percent = Math.max(Number(video.progress_percent) || 0, 2);
-      await video.save();
-      authorizationToken = HF_TOKEN;
-    }
-
-    if (!inferenceBaseUrl) {
+    if (!INFERENCE_BASE_URL) {
       throw new Error("INFERENCE_BASE_URL is not configured");
     }
 
-    let callbackUrl = null;
-    let progressUrl = null;
-    if (!useHfSpace) {
-      const callbackBase = API_BASE_URL || "";
-      if (!callbackBase) {
-        throw new Error("API_BASE_URL is required for background video callbacks");
-      }
-      callbackUrl = `${callbackBase}/internal/videos/generated/${video.id}/content`;
-      progressUrl = `${callbackBase}/internal/videos/generated/${video.id}/progress`;
+    const callbackBase = API_BASE_URL || "";
+    if (!callbackBase) {
+      throw new Error("API_BASE_URL is required for background video callbacks");
     }
+    const callbackUrl = `${callbackBase}/internal/videos/generated/${video.id}/content`;
+    const progressUrl = `${callbackBase}/internal/videos/generated/${video.id}/progress`;
 
-    const outputBytes = await triggerVideoSwap({
+    await triggerVideoSwap({
       generatedVideoId: video.id,
-      inferenceBaseUrl,
-      authorizationToken,
       modelBytes,
       videoBytes,
       videoFilename: video.filename,
@@ -573,25 +368,6 @@ async function processVideoSwapJob(videoId) {
       callbackToken: INFERENCE_CALLBACK_TOKEN,
     });
 
-    if (useHfSpace) {
-      const driveResult = await uploadBuffer({
-        buffer: outputBytes,
-        filename: `swapped-${video.id}-${Date.now()}.mp4`,
-        mimeType: "video/mp4",
-        authUser: owner,
-      });
-      video.filename = `swapped-${video.id}.mp4`;
-      video.mime_type = driveResult.mime_type || "video/mp4";
-      video.processing = false;
-      video.status = "done";
-      video.error = null;
-      video.progress_percent = 100;
-      video.drive_file_id = driveResult.drive_file_id;
-      video.size = driveResult.size;
-      video.finished_at = new Date();
-      await video.save();
-    }
-
     const completed = await GeneratedVideo.findOne({ id: video.id });
     if (completed && completed.status === "processing" && completed.drive_file_id) {
       completed.status = "done";
@@ -605,10 +381,6 @@ async function processVideoSwapJob(videoId) {
     }
   } catch (err) {
     await markVideoFailed(video, err);
-  } finally {
-    await deleteHfSpace(duplicatedSpaceId).catch((err) =>
-      logApiError(`delete duplicated HF Space ${duplicatedSpaceId}`, err)
-    );
   }
 }
 

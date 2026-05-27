@@ -425,17 +425,6 @@ export default function ImageGallery({ isActive = false }) {
   }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize]);
 
   useEffect(() => {
-    if (!token || !isActive || activeType !== 'videos') return undefined;
-    if (!videos.some((video) => video.processing || video.status === 'queued' || video.status === 'processing')) {
-      return undefined;
-    }
-    const intervalId = window.setInterval(() => {
-      fetchGallery();
-    }, 5000);
-    return () => window.clearInterval(intervalId);
-  }, [token, isActive, activeType, videos]);
-
-  useEffect(() => {
     if (!isPreviewOpen) return undefined;
     const onKeyDown = (event) => {
       if (!isForcedPreview && event.key === 'ArrowLeft') showPrevious();

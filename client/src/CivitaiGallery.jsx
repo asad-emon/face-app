@@ -34,15 +34,84 @@ import {
 import { apiBaseUrl } from './utils';
 import { useApp } from './contexts/AppContext.jsx';
 
-const CIVITAI_IMAGES_ENDPOINT = 'https://civitai.com/api/v1/images';
+const CIVITAI_IMAGES_ENDPOINT = `${apiBaseUrl}/civitai/images`;
 const PAGE_SIZE_OPTIONS = [8, 12, 24, 48, 96, 120];
 const SORT_OPTIONS = ['Newest', 'Most Reactions', 'Most Comments'];
 const PERIOD_OPTIONS = ['AllTime', 'Year', 'Month', 'Week', 'Day'];
 const NSFW_OPTIONS = ['', 'None', 'Soft', 'Mature', 'X'];
+const INFERENCE_MAX_IMAGE_SIZE = 1600;
+const INFERENCE_JPEG_QUALITY = 0.82;
 
 function toNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getCivitaiImageProxyUrl(url) {
+  const params = new URLSearchParams({ url });
+  return `${apiBaseUrl}/civitai/image?${params.toString()}`;
+}
+
+function getOptimizedCivitaiImageUrl(url, width) {
+  if (!url) return '';
+  return url.replace(/\/width=\d+\//, `/width=${width}/`);
+}
+
+async function blobToBitmap(blob) {
+  if (typeof createImageBitmap === 'function') {
+    return createImageBitmap(blob);
+  }
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new window.Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to decode image.'));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function compressImageBlob(blob) {
+  if (!blob?.type?.startsWith('image/')) return blob;
+
+  const source = await blobToBitmap(blob);
+  const sourceWidth = source.width;
+  const sourceHeight = source.height;
+  const scale = Math.min(1, INFERENCE_MAX_IMAGE_SIZE / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+
+  if (scale === 1 && blob.size < 900 * 1024 && blob.type === 'image/jpeg') {
+    if (typeof source.close === 'function') source.close();
+    return blob;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    if (typeof source.close === 'function') source.close();
+    return blob;
+  }
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.drawImage(source, 0, 0, width, height);
+  if (typeof source.close === 'function') source.close();
+
+  return new Promise((resolve) => {
+    canvas.toBlob(
+      (compressed) => resolve(compressed || blob),
+      'image/jpeg',
+      INFERENCE_JPEG_QUALITY
+    );
+  });
 }
 
 export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
@@ -422,11 +491,17 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
       pollRef.current = null;
     }
     try {
-      const imageResponse = await fetch(preview.url);
+      const imageHeaders = {};
+      if (token) {
+        imageHeaders.Authorization = `Bearer ${token}`;
+      }
+      const imageResponse = await fetch(getCivitaiImageProxyUrl(preview.url), {
+        headers: imageHeaders,
+      });
       if (!imageResponse.ok) {
         throw new Error('Failed to download image from Civitai.');
       }
-      const blob = await imageResponse.blob();
+      const blob = await compressImageBlob(await imageResponse.blob());
       const extension = blob.type && blob.type.includes('png') ? 'png' : 'jpg';
       const filename = `civitai-${preview.id}.${extension}`;
       const formData = new FormData();
@@ -824,12 +899,13 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
                   </HStack>
                 </Stack>
                 <Image
-                  src={image.url}
+                  src={getOptimizedCivitaiImageUrl(image.url, 450)}
                   alt={`Civitai ${image.id}`}
                   w="100%"
                   h="220px"
                   objectFit="cover"
                   loading="lazy"
+                  decoding="async"
                   cursor="pointer"
                   onClick={() => {
                     setPreviewId(image.id);
@@ -856,7 +932,7 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
         {paginationControls}
 
         <Text fontSize="sm" color="gray.500">
-          If you hit CORS errors in the browser, we can proxy the Civitai API through the backend.
+          Civitai API calls and downloads are proxied through the backend.
         </Text>
       </Stack>
 
@@ -876,9 +952,11 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
             {preview ? (
               <Stack spacing={4} align="center">
                 <Image
-                  src={preview.url}
+                  src={getOptimizedCivitaiImageUrl(preview.url, 1200)}
                   alt={`Civitai ${preview.id}`}
                   maxH="70vh"
+                  loading="eager"
+                  decoding="async"
                   style={{ transform: `scale(${zoomLevel})`, transition: 'transform 120ms ease-out' }}
                 />
                 <Text color="gray.500">

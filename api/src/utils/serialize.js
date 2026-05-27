@@ -60,8 +60,6 @@ export function serializeGeneratedVideo(video) {
     progress_percent: Number(video.progress_percent) || 0,
     has_content: hasContent,
     swap_model: video.swap_model || "inswapper_128",
-    hf_space_id: video.hf_space_id || null,
-    hf_space_url: video.hf_space_url || null,
     started_at: video.started_at || null,
     finished_at: video.finished_at || null,
     created_at: video.created_at || null,

@@ -112,8 +112,6 @@ const generatedVideoSchema = new Schema(
     enable_restore: { type: Boolean, required: true, default: false },
     expression_strength: { type: Number, required: true, default: 0.85 },
     swap_model: { type: String, default: "inswapper_128" },
-    hf_space_id: { type: String, default: null },
-    hf_space_url: { type: String, default: null },
     started_at: { type: Date, default: null },
     finished_at: { type: Date, default: null },
   },
