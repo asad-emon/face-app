@@ -47,6 +47,15 @@ function toNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizeCivitaiToken(value) {
+  return String(value || '').trim().replace(/^(Bearer\s+)+/i, '').trim();
+}
+
+function getCivitaiHeaders(token) {
+  const normalized = normalizeCivitaiToken(token);
+  return normalized ? { Authorization: `Bearer ${normalized}` } : {};
+}
+
 function getCivitaiImageProxyUrl(url) {
   const params = new URLSearchParams({ url });
   return `${apiBaseUrl}/civitai/image?${params.toString()}`;
@@ -116,7 +125,7 @@ async function compressImageBlob(blob) {
 
 export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
   const { token: appToken } = useApp();
-  const [token, setToken] = useState(localStorage.getItem('civitai_token') || '');
+  const [token, setToken] = useState(normalizeCivitaiToken(localStorage.getItem('civitai_token') || ''));
   const [tokenInput, setTokenInput] = useState(token);
   const [items, setItems] = useState([]);
   const [metadata, setMetadata] = useState(null);
@@ -177,10 +186,7 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
     setBusy(true);
     setError('');
     try {
-      const headers = {};
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
+      const headers = getCivitaiHeaders(token);
       const response = await fetch(`${CIVITAI_IMAGES_ENDPOINT}?${params.toString()}`, {
         headers,
       });
@@ -264,7 +270,7 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
         params.set('favorites', 'true');
         params.set('nsfw', 'true');
         const response = await fetch(`${apiBaseUrl}/civitai/models?${params.toString()}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: getCivitaiHeaders(token),
         });
         if (!response.ok) {
           let detail = `Failed to load favorite models (${response.status})`;
@@ -491,10 +497,7 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
       pollRef.current = null;
     }
     try {
-      const imageHeaders = {};
-      if (token) {
-        imageHeaders.Authorization = `Bearer ${token}`;
-      }
+      const imageHeaders = getCivitaiHeaders(token);
       const imageResponse = await fetch(getCivitaiImageProxyUrl(preview.url), {
         headers: imageHeaders,
       });
@@ -605,8 +608,10 @@ export default function CivitaiGallery({ isActive = false, onUseInputImage }) {
               <HStack spacing={2}>
                 <Button
                   onClick={() => {
-                    localStorage.setItem('civitai_token', tokenInput.trim());
-                    setToken(tokenInput.trim());
+                    const normalized = normalizeCivitaiToken(tokenInput);
+                    localStorage.setItem('civitai_token', normalized);
+                    setToken(normalized);
+                    setTokenInput(normalized);
                   }}
                 >
                   Save Token

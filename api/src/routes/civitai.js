@@ -7,9 +7,28 @@ const CIVITAI_BASE_URL = "https://civitai.com/api/v1";
 const CIVITAI_HOST_RE = /(^|\.)civitai\.com$/i;
 
 function getCivitaiHeaders(req) {
-  return req.headers.authorization
-    ? { Authorization: req.headers.authorization }
-    : undefined;
+  const rawAuth = String(req.headers.authorization || "").trim();
+  const token = rawAuth.replace(/^(Bearer\s+)+/i, "").trim();
+  return token ? { Authorization: `Bearer ${token}` } : undefined;
+}
+
+function getCivitaiErrorData(err, fallbackDetail) {
+  const data = err.response?.data;
+  const upstreamMessage = String(data?.detail || data?.message || data?.error || "");
+
+  if (upstreamMessage.includes("Cannot read properties of undefined") && upstreamMessage.includes("id")) {
+    return {
+      status: 401,
+      data: {
+        detail: "Civitai rejected the API token. Save a valid raw Civitai API key, or clear the token for public content.",
+      },
+    };
+  }
+
+  return {
+    status: err.response?.status || 500,
+    data: data || { detail: fallbackDetail },
+  };
 }
 
 async function proxyCivitaiGet(path, req, res, fallbackDetail) {
@@ -20,8 +39,7 @@ async function proxyCivitaiGet(path, req, res, fallbackDetail) {
     });
     return res.status(response.status).json(response.data);
   } catch (err) {
-    const status = err.response?.status || 500;
-    const data = err.response?.data || { detail: fallbackDetail };
+    const { status, data } = getCivitaiErrorData(err, fallbackDetail);
     return res.status(status).json(data);
   }
 }
@@ -69,10 +87,11 @@ router.get("/civitai/image", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=86400");
     return res.status(response.status).send(Buffer.from(response.data));
   } catch (err) {
-    const status = err.response?.status || 500;
-    return res
-      .status(status)
-      .json({ detail: "Failed to fetch Civitai image." });
+    const { status, data } = getCivitaiErrorData(
+      err,
+      "Failed to fetch Civitai image."
+    );
+    return res.status(status).json(data);
   }
 });
 
