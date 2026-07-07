@@ -6,7 +6,7 @@ import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
 import { getErrorDetail, parseBoolean, parseSwapModel } from "../utils/parsing.js";
 import { serializeGeneratedVideo, serializeSwapJob } from "../utils/serialize.js";
-import { uploadBuffer, deleteFile } from "../services/driveStorage.js";
+import { uploadBuffer, deleteFile } from "../services/storage.js";
 import { enqueueSwapJob, enqueueVideoSwapJob, runSwapAndStore } from "../services/swapService.js";
 
 const router = express.Router();
@@ -181,7 +181,7 @@ router.post(
   }
 
   const created = [];
-  const uploadedInputDriveIds = [];
+  const uploadedInputFiles = [];
   try {
     for (const video of videos) {
       const inputDrive = await uploadBuffer({
@@ -190,7 +190,7 @@ router.post(
         mimeType: video.mimetype || "video/mp4",
         authUser: req.user,
       });
-      uploadedInputDriveIds.push(inputDrive.drive_file_id);
+      uploadedInputFiles.push({ id: inputDrive.drive_file_id, provider: inputDrive.storage_provider });
 
       const generatedVideo = await GeneratedVideo.create({
         filename: video.originalname || "target.mp4",
@@ -203,6 +203,7 @@ router.post(
         progress_percent: 0,
         drive_file_id: null,
         input_drive_file_id: inputDrive.drive_file_id,
+        input_storage_provider: inputDrive.storage_provider,
         input_mime_type: video.mimetype || "video/mp4",
         input_size: inputDrive.size,
         owner_id: req.user.id,
@@ -232,9 +233,9 @@ router.post(
       });
     }
     await Promise.all(
-      uploadedInputDriveIds.map((driveId) =>
-        deleteFile(driveId, req.user).catch((deleteErr) =>
-          logApiError(`POST /swap-video cleanup ${driveId}`, deleteErr)
+      uploadedInputFiles.map((file) =>
+        deleteFile(file.id, req.user, file.provider).catch((deleteErr) =>
+          logApiError(`POST /swap-video cleanup ${file.id}`, deleteErr)
         )
       )
     );

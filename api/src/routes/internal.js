@@ -3,7 +3,7 @@ import { GeneratedVideo, User } from "../db.js";
 import { requireInferenceAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
-import { uploadBuffer, deleteFile } from "../services/driveStorage.js";
+import { uploadBuffer, deleteFile } from "../services/storage.js";
 
 const router = express.Router();
 
@@ -57,11 +57,12 @@ router.post(
         authUser: owner,
       });
     } catch (err) {
-      logApiError(`POST /internal/videos/${id}/content drive upload`, err);
-      return res.status(502).json({ detail: `Drive upload failed: ${err.message}` });
+      logApiError(`POST /internal/videos/${id}/content storage upload`, err);
+      return res.status(502).json({ detail: `Storage upload failed: ${err.message}` });
     }
 
     const previousDriveId = video.drive_file_id;
+    const previousProvider = video.storage_provider;
 
     video.filename = filename;
     video.mime_type = mimeType;
@@ -72,12 +73,13 @@ router.post(
     video.processed_frames = processedFrames || 0;
     video.progress_percent = progressPercent;
     video.drive_file_id = driveResult.drive_file_id;
+    video.storage_provider = driveResult.storage_provider;
     video.size = driveResult.size;
     video.finished_at = new Date();
     await video.save();
 
     if (previousDriveId && previousDriveId !== driveResult.drive_file_id) {
-      await deleteFile(previousDriveId, owner).catch((err) =>
+      await deleteFile(previousDriveId, owner, previousProvider).catch((err) =>
         logApiError(`POST /internal/videos/${id}/content cleanup ${previousDriveId}`, err)
       );
     }

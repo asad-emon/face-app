@@ -22,3 +22,19 @@ export const SWAP_MAX_RETRIES = Math.max(0, Number(process.env.SWAP_MAX_RETRIES 
 export const SWAP_RETRY_DELAY_MS = Math.max(0, Number(process.env.SWAP_RETRY_DELAY_MS || 750));
 export const SWAP_QUEUE_POLL_LIMIT = Math.max(1, Number(process.env.SWAP_QUEUE_POLL_LIMIT || 200));
 export const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN;
+
+// Storage providers for generated/input content. Supported: "huggingface", "gdrive".
+export const STORAGE_GDRIVE = "gdrive";
+export const STORAGE_HUGGINGFACE = "huggingface";
+
+// Provider used for newly uploaded content. Defaults to Hugging Face, falling
+// back to Google Drive at runtime when HF credentials are not configured.
+export const DEFAULT_STORAGE_PROVIDER = (
+  process.env.DEFAULT_STORAGE_PROVIDER || STORAGE_HUGGINGFACE
+).toLowerCase();
+
+// Hugging Face Hub storage (dataset/model/space repo used as a bucket).
+export const HF_TOKEN = process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN || "";
+export const HF_STORAGE_REPO = process.env.HF_STORAGE_REPO || "";
+export const HF_STORAGE_REPO_TYPE = (process.env.HF_STORAGE_REPO_TYPE || "dataset").toLowerCase();
+export const HF_STORAGE_BRANCH = process.env.HF_STORAGE_BRANCH || "main";

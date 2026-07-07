@@ -16,7 +16,7 @@ import {
   uploadBuffer,
   downloadBuffer,
   deleteFile,
-} from "./driveStorage.js";
+} from "./storage.js";
 
 const swapQueue = [];
 let swapWorkerActive = false;
@@ -107,8 +107,8 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
   }
 
   const [modelBytes, imageBytes] = await Promise.all([
-    downloadBuffer(model.drive_file_id, owner),
-    downloadBuffer(image.drive_file_id, owner),
+    downloadBuffer(model.drive_file_id, owner, model.storage_provider),
+    downloadBuffer(image.drive_file_id, owner, image.storage_provider),
   ]);
 
   const outputBytes = await runSwapRemote(
@@ -131,13 +131,14 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
       authUser: owner,
     });
   } catch (err) {
-    throw new Error(`Drive upload failed: ${err.message}`);
+    throw new Error(`Storage upload failed: ${err.message}`);
   }
 
   let generated;
   try {
     generated = await GeneratedImage.create({
       drive_file_id: driveResult.drive_file_id,
+      storage_provider: driveResult.storage_provider,
       mime_type: driveResult.mime_type,
       size: driveResult.size,
       owner_id: ownerId,
@@ -145,7 +146,7 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
       face_model_id: modelId,
     });
   } catch (err) {
-    await deleteFile(driveResult.drive_file_id, owner).catch(() => { });
+    await deleteFile(driveResult.drive_file_id, owner, driveResult.storage_provider).catch(() => { });
     throw err;
   }
 
@@ -337,8 +338,8 @@ async function processVideoSwapJob(videoId) {
     }
 
     const [modelBytes, videoBytes] = await Promise.all([
-      downloadBuffer(model.drive_file_id, owner),
-      downloadBuffer(video.input_drive_file_id, owner),
+      downloadBuffer(model.drive_file_id, owner, model.storage_provider),
+      downloadBuffer(video.input_drive_file_id, owner, video.input_storage_provider),
     ]);
 
     if (!INFERENCE_BASE_URL) {

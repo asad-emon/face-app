@@ -17,7 +17,7 @@ import {
   uploadBuffer,
   deleteFile,
   deleteManyFiles,
-} from "../services/driveStorage.js";
+} from "../services/storage.js";
 
 const router = express.Router();
 
@@ -120,7 +120,7 @@ router.post(
       return res.json(serializeFaceModel(refreshed || createdModel));
     } catch (err) {
       if (driveResult?.drive_file_id) {
-        await deleteFile(driveResult.drive_file_id, req.user).catch(() => {});
+        await deleteFile(driveResult.drive_file_id, req.user, driveResult.storage_provider).catch(() => {});
       }
       logApiError("POST /models/generate", err);
       const detail = err.response?.data?.detail || err.message;
@@ -186,6 +186,7 @@ router.post("/models/upload", requireAuth, upload.single("file"), async (req, re
       version,
       is_active: false,
       drive_file_id: driveResult.drive_file_id,
+      storage_provider: driveResult.storage_provider,
       mime_type: driveResult.mime_type,
       size: driveResult.size,
       owner_id: req.user.id,
@@ -312,8 +313,8 @@ router.delete("/models/:id", requireAuth, async (req, res) => {
     }
 
     if (deletedCount > 0) {
-      await deleteFile(model.drive_file_id, req.user).catch((err) =>
-        logApiError(`DELETE /models/:id drive ${model.drive_file_id}`, err)
+      await deleteFile(model.drive_file_id, req.user, model.storage_provider).catch((err) =>
+        logApiError(`DELETE /models/:id storage ${model.drive_file_id}`, err)
       );
     }
 
@@ -336,7 +337,7 @@ router.delete("/models/person/:personName", requireAuth, async (req, res) => {
       person_name: personName,
       is_deleted: false,
     })
-      .select({ drive_file_id: 1 })
+      .select({ drive_file_id: 1, storage_provider: 1 })
       .lean();
 
     const updateResult = await FaceModel.updateMany(
@@ -353,7 +354,10 @@ router.delete("/models/person/:personName", requireAuth, async (req, res) => {
       return res.status(404).json({ detail: "No models found for person" });
     }
 
-    await deleteManyFiles(toDelete.map((m) => m.drive_file_id), req.user);
+    await deleteManyFiles(
+      toDelete.map((m) => ({ id: m.drive_file_id, provider: m.storage_provider })),
+      req.user
+    );
 
     return res.json({ deleted: deletedCount });
   } catch (err) {

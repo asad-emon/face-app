@@ -8,7 +8,7 @@ import {
   downloadRange,
   deleteFile,
   deleteManyFiles,
-} from "../services/driveStorage.js";
+} from "../services/storage.js";
 
 const router = express.Router();
 
@@ -86,7 +86,7 @@ router.get("/videos/generated/:id/content", requireAuth, async (req, res) => {
 
   try {
     if (!range) {
-      const fullBuffer = await downloadBuffer(video.drive_file_id, req.user);
+      const fullBuffer = await downloadBuffer(video.drive_file_id, req.user, video.storage_provider);
       res.setHeader("Content-Length", String(fullBuffer.length));
       return res.send(fullBuffer);
     }
@@ -113,7 +113,7 @@ router.get("/videos/generated/:id/content", requireAuth, async (req, res) => {
       return res.status(416).end();
     }
 
-    const chunk = await downloadRange(video.drive_file_id, start, end, req.user);
+    const chunk = await downloadRange(video.drive_file_id, start, end, req.user, video.storage_provider);
     const chunkEnd = start + chunk.length - 1;
     const totalForHeader = total > 0 ? total : chunkEnd + 1;
     res.status(206);
@@ -143,13 +143,13 @@ router.delete("/videos/generated/:id", requireAuth, async (req, res) => {
   }
 
   if (existing.drive_file_id) {
-    await deleteFile(existing.drive_file_id, req.user).catch((err) =>
-      logApiError(`DELETE /videos/generated/:id drive ${existing.drive_file_id}`, err)
+    await deleteFile(existing.drive_file_id, req.user, existing.storage_provider).catch((err) =>
+      logApiError(`DELETE /videos/generated/:id storage ${existing.drive_file_id}`, err)
     );
   }
   if (existing.input_drive_file_id) {
-    await deleteFile(existing.input_drive_file_id, req.user).catch((err) =>
-      logApiError(`DELETE /videos/generated/:id input drive ${existing.input_drive_file_id}`, err)
+    await deleteFile(existing.input_drive_file_id, req.user, existing.input_storage_provider).catch((err) =>
+      logApiError(`DELETE /videos/generated/:id input storage ${existing.input_drive_file_id}`, err)
     );
   }
 
@@ -172,7 +172,12 @@ router.delete("/videos/generated", requireAuth, async (req, res) => {
     owner_id: req.user.id,
     id: { $in: uniqueIds },
   })
-    .select({ drive_file_id: 1, input_drive_file_id: 1 })
+    .select({
+      drive_file_id: 1,
+      storage_provider: 1,
+      input_drive_file_id: 1,
+      input_storage_provider: 1,
+    })
     .lean();
 
   const result = await GeneratedVideo.deleteMany({
@@ -181,7 +186,10 @@ router.delete("/videos/generated", requireAuth, async (req, res) => {
   });
 
   await deleteManyFiles(
-    existing.flatMap((v) => [v.drive_file_id, v.input_drive_file_id]),
+    existing.flatMap((v) => [
+      { id: v.drive_file_id, provider: v.storage_provider },
+      { id: v.input_drive_file_id, provider: v.input_storage_provider },
+    ]),
     req.user
   );
 
