@@ -12,6 +12,8 @@ import videoRoutes from "./routes/videos.js";
 import swapRoutes from "./routes/swaps.js";
 import internalRoutes from "./routes/internal.js";
 import civitaiRoutes from "./routes/civitai.js";
+import settingsRoutes from "./routes/settings.js";
+import inferenceRoutes from "./routes/inference.js";
 
 const app = express();
 
@@ -36,6 +38,8 @@ app.use(videoRoutes);
 app.use(swapRoutes);
 app.use(internalRoutes);
 app.use(civitaiRoutes);
+app.use(settingsRoutes);
+app.use(inferenceRoutes);
 
 async function start() {
   try {
@@ -47,9 +51,15 @@ async function start() {
     await bootstrapSwapQueue();
     await bootstrapVideoSwapQueue();
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`API server listening on ${PORT}`);
     });
+    // Video swaps stream large files back via the internal callback and can run
+    // for a long time. Disable per-request/header timeouts so big uploads and
+    // long-running inference callbacks are never cut off.
+    server.requestTimeout = 0;
+    server.headersTimeout = 0;
+    server.timeout = 0;
   } catch (err) {
     logApiError("start", err);
     process.exit(1);

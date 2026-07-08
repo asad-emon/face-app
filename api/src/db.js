@@ -89,6 +89,7 @@ const generatedImageSchema = new Schema(
     owner_id: { type: Number, required: true, index: true },
     input_image_id: { type: Number, required: true, index: true },
     face_model_id: { type: Number, required: true, index: true },
+    rating: { type: Number, default: null },
   },
   { collection: "generated_images", versionKey: false }
 );
@@ -150,12 +151,28 @@ const swapJobSchema = new Schema(
 );
 attachAutoIncrement(swapJobSchema, "swap_jobs");
 
+const userSettingsSchema = new Schema(
+  {
+    id: { type: Number, unique: true, index: true },
+    owner_id: { type: Number, required: true, unique: true, index: true },
+    save_input_files: { type: Boolean, required: true, default: true },
+    expression_restore_enabled: { type: Boolean, required: true, default: true },
+  },
+  {
+    collection: "user_settings",
+    versionKey: false,
+    timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
+  }
+);
+attachAutoIncrement(userSettingsSchema, "user_settings");
+
 export const User = mongoose.model("User", userSchema);
 export const FaceModel = mongoose.model("FaceModel", faceModelSchema);
 export const InputImage = mongoose.model("InputImage", inputImageSchema);
 export const GeneratedImage = mongoose.model("GeneratedImage", generatedImageSchema);
 export const GeneratedVideo = mongoose.model("GeneratedVideo", generatedVideoSchema);
 export const SwapJob = mongoose.model("SwapJob", swapJobSchema);
+export const UserSettings = mongoose.model("UserSettings", userSettingsSchema);
 
 export async function initDb() {
   await mongoose.connect(MONGODB_URI, {
@@ -168,5 +185,6 @@ export async function initDb() {
     GeneratedImage.syncIndexes(),
     GeneratedVideo.syncIndexes(),
     SwapJob.syncIndexes(),
+    UserSettings.syncIndexes(),
   ]);
 }

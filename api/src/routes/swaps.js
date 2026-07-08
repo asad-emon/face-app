@@ -8,12 +8,16 @@ import { getErrorDetail, parseBoolean, parseSwapModel } from "../utils/parsing.j
 import { serializeGeneratedVideo, serializeSwapJob } from "../utils/serialize.js";
 import { uploadBuffer, deleteFile } from "../services/storage.js";
 import { enqueueSwapJob, enqueueVideoSwapJob, runSwapAndStore } from "../services/swapService.js";
+import { getUserSettings } from "../services/settingsService.js";
 
 const router = express.Router();
 
 router.post("/swap-jobs", requireAuth, async (req, res) => {
   const modelId = Number(req.body?.model_id);
-  const enableRestore = parseBoolean(req.body?.enable_restore, true);
+  const settings = await getUserSettings(req.user.id);
+  const enableRestore = settings.expression_restore_enabled
+    ? parseBoolean(req.body?.enable_restore, true)
+    : false;
   const expressionStrength = Math.max(0, Math.min(1, Number(req.body?.expression_strength ?? 0.85))) || 0.85;
   const swapModel = parseSwapModel(req.body?.swap_model);
   const imageIds = Array.isArray(req.body?.image_ids)
@@ -102,10 +106,10 @@ router.get("/swap-jobs", requireAuth, async (req, res) => {
 router.post("/swap", requireAuth, async (req, res) => {
   const modelId = Number(req.query.model_id || req.body.model_id);
   const imageId = Number(req.query.image_id || req.body.image_id);
-  const enableRestore = parseBoolean(
-    req.query.enable_restore ?? req.body.enable_restore,
-    true
-  );
+  const settings = await getUserSettings(req.user.id);
+  const enableRestore = settings.expression_restore_enabled
+    ? parseBoolean(req.query.enable_restore ?? req.body.enable_restore, true)
+    : false;
   const expressionStrength = Math.max(0, Math.min(1, Number(
     req.query.expression_strength ?? req.body.expression_strength ?? 0.85
   ))) || 0.85;
@@ -142,10 +146,10 @@ router.post(
   ]),
   async (req, res) => {
   const modelId = Number(req.query.model_id || req.body.model_id);
-  const enableRestore = parseBoolean(
-    req.query.enable_restore ?? req.body.enable_restore,
-    false
-  );
+  const settings = await getUserSettings(req.user.id);
+  const enableRestore = settings.expression_restore_enabled
+    ? parseBoolean(req.query.enable_restore ?? req.body.enable_restore, false)
+    : false;
   const expressionStrength = Math.max(0, Math.min(1, Number(
     req.query.expression_strength ?? req.body.expression_strength ?? 0.85
   ))) || 0.85;

@@ -17,6 +17,7 @@ import {
   downloadBuffer,
   deleteFile,
 } from "./storage.js";
+import { getUserSettings } from "./settingsService.js";
 
 const swapQueue = [];
 let swapWorkerActive = false;
@@ -205,6 +206,65 @@ export async function triggerVideoSwap({
   return response.data;
 }
 
+// When the owner has disabled input-file saving, drop the source input image
+// once the last swap job that referenced it has finished producing output. The
+// generated result is kept; only the retained input is removed from storage.
+async function maybeDeleteInputImageAfterSwap(ownerId, inputImageId) {
+  if (!inputImageId) {
+    return;
+  }
+  try {
+    const settings = await getUserSettings(ownerId);
+    if (settings.save_input_files) {
+      return;
+    }
+    const pending = await SwapJob.countDocuments({
+      owner_id: ownerId,
+      input_image_id: inputImageId,
+      status: { $in: ["queued", "processing"] },
+    });
+    if (pending > 0) {
+      return;
+    }
+    const input = await InputImage.findOne({ id: inputImageId, owner_id: ownerId }).lean();
+    if (!input) {
+      return;
+    }
+    const owner = await User.findOne({ id: ownerId });
+    await InputImage.deleteOne({ id: inputImageId, owner_id: ownerId });
+    await deleteFile(input.drive_file_id, owner, input.storage_provider).catch((err) =>
+      logApiError(`maybeDeleteInputImageAfterSwap storage ${input.drive_file_id}`, err)
+    );
+  } catch (err) {
+    logApiError(`maybeDeleteInputImageAfterSwap input ${inputImageId}`, err);
+  }
+}
+
+// When the owner has disabled input-file saving, remove the stored input video
+// after the output has been produced, and clear its storage fields.
+export async function deleteVideoInputIfNotSaved(video, owner) {
+  if (!video?.input_drive_file_id) {
+    return;
+  }
+  try {
+    const settings = await getUserSettings(video.owner_id);
+    if (settings.save_input_files) {
+      return;
+    }
+    const inputId = video.input_drive_file_id;
+    const provider = video.input_storage_provider;
+    const authUser = owner || (await User.findOne({ id: video.owner_id }));
+    await deleteFile(inputId, authUser, provider).catch((err) =>
+      logApiError(`deleteVideoInputIfNotSaved storage ${inputId}`, err)
+    );
+    video.input_drive_file_id = null;
+    video.input_size = 0;
+    await video.save();
+  } catch (err) {
+    logApiError(`deleteVideoInputIfNotSaved video ${video?.id}`, err);
+  }
+}
+
 export function enqueueSwapJob(jobId, expressionStrength = 0.85) {
   if (!swapQueue.some((item) => item.jobId === jobId)) {
     swapQueue.push({ jobId, expressionStrength });
@@ -246,6 +306,7 @@ async function processSwapQueue() {
         job.error = null;
         job.finished_at = new Date();
         await job.save();
+        await maybeDeleteInputImageAfterSwap(job.owner_id, job.input_image_id);
       } catch (err) {
         const detail = getErrorDetail(err).slice(0, 2000);
         job.status = "failed";
@@ -377,6 +438,7 @@ async function processVideoSwapJob(videoId) {
       completed.error = null;
       completed.finished_at = completed.finished_at || new Date();
       await completed.save();
+      await deleteVideoInputIfNotSaved(completed, owner);
     } else if (completed && !completed.drive_file_id && completed.status === "processing") {
       throw new Error("Inference finished without posting generated video content");
     }

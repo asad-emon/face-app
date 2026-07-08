@@ -40,6 +40,14 @@ export function serializeGeneratedImage(image, options = {}) {
     mime_type: image.mime_type || "image/jpeg",
     input_image_id: image.input_image_id,
     face_model_id: image.face_model_id,
+    rating: image.rating === undefined ? null : image.rating,
+  };
+}
+
+export function serializeUserSettings(settings) {
+  return {
+    save_input_files: Boolean(settings.save_input_files),
+    expression_restore_enabled: Boolean(settings.expression_restore_enabled),
   };
 }
 

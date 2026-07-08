@@ -15,7 +15,9 @@ let nextLocalId = 1;
 const SwapContext = createContext(null);
 
 export function SwapProvider({ children }) {
-  const { token } = useApp();
+  const { token, settings, settingsLoaded } = useApp();
+  const expressionRestoreEnabled = settings?.expression_restore_enabled !== false;
+  const restoreDefaultApplied = useRef(false);
   const [targetImages, setTargetImages] = useState([]);
   const [models, setModels] = useState([]);
   const [selectedPerson, setSelectedPerson] = useState('');
@@ -53,6 +55,21 @@ export function SwapProvider({ children }) {
   useEffect(() => {
     targetImagesRef.current = targetImages;
   }, [targetImages]);
+
+  // Default the per-swap restore toggle from the master setting, and force it
+  // off whenever the feature is disabled in settings.
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (!expressionRestoreEnabled) {
+      setEnableRestore(false);
+      restoreDefaultApplied.current = true;
+      return;
+    }
+    if (!restoreDefaultApplied.current) {
+      setEnableRestore(true);
+      restoreDefaultApplied.current = true;
+    }
+  }, [settingsLoaded, expressionRestoreEnabled]);
 
   useEffect(() => {
     return () => {
@@ -547,6 +564,7 @@ export function SwapProvider({ children }) {
       selectedModelId,
       enableRestore,
       setEnableRestore,
+      expressionRestoreEnabled,
       expressionStrength,
       setExpressionStrength,
       swapModel,
@@ -602,6 +620,7 @@ export function SwapProvider({ children }) {
       selectedPerson,
       selectedModelId,
       enableRestore,
+      expressionRestoreEnabled,
       expressionStrength,
       swapModel,
       handlePersonChange,

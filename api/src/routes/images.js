@@ -201,9 +201,16 @@ router.get("/images/generated", requireAuth, async (req, res) => {
       ? Math.min(parsedLimit, 100)
       : 12;
 
+  // Default newest-first; `sort=rating` orders by highest rating first (unrated
+  // rows fall to the end since MongoDB sorts null lowest on a descending sort).
+  const sortSpec =
+    String(req.query.sort || "").toLowerCase() === "rating"
+      ? { rating: -1, id: -1 }
+      : { id: -1 };
+
   const filter = { owner_id: req.user.id };
   const [rows, count] = await Promise.all([
-    GeneratedImage.find(filter).sort({ id: -1 }).skip(skip).limit(limit).lean(),
+    GeneratedImage.find(filter).sort(sortSpec).skip(skip).limit(limit).lean(),
     GeneratedImage.countDocuments(filter),
   ]);
 
@@ -252,6 +259,36 @@ router.get("/images/generated/:id(\\d+)", requireAuth, async (req, res) => {
   }
 
   return res.json(serializeGeneratedImage(image, { data }));
+});
+
+router.patch("/images/generated/:id(\\d+)/rating", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) {
+    return res.status(400).json({ detail: "Invalid generated image id" });
+  }
+
+  const raw = req.body?.rating;
+  let rating;
+  if (raw === null || raw === "" || raw === undefined) {
+    rating = null; // clear the rating
+  } else {
+    rating = Number(raw);
+    if (!Number.isFinite(rating) || rating < 1 || rating > 10) {
+      return res.status(400).json({ detail: "rating must be a number between 1 and 10" });
+    }
+    rating = Math.round(rating * 10) / 10; // one decimal place
+  }
+
+  const image = await GeneratedImage.findOneAndUpdate(
+    { id, owner_id: req.user.id },
+    { $set: { rating } },
+    { new: true }
+  ).lean();
+  if (!image) {
+    return res.status(404).json({ detail: "Generated image not found" });
+  }
+
+  return res.json(serializeGeneratedImage(image, { data: null }));
 });
 
 router.delete("/images/generated/:id(\\d+)", requireAuth, async (req, res) => {

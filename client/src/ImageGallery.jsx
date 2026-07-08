@@ -17,6 +17,10 @@ import {
   Progress,
   Select,
   SimpleGrid,
+  Slider,
+  SliderFilledTrack,
+  SliderThumb,
+  SliderTrack,
   Stack,
   Tab,
   TabList,
@@ -30,9 +34,11 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   DeleteIcon,
+  DownloadIcon,
   LinkIcon,
   MinusIcon,
   RepeatIcon,
+  StarIcon,
 } from '@chakra-ui/icons';
 import { apiBaseUrl } from './utils';
 import { useApp } from './contexts/AppContext.jsx';
@@ -65,7 +71,13 @@ export default function ImageGallery({ isActive = false }) {
   const [statusLoadingIds, setStatusLoadingIds] = useState([]);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [autoSelectPosition, setAutoSelectPosition] = useState(null); // 'first', 'last', or null
+  const [imageSort, setImageSort] = useState('recent'); // 'recent' | 'rating'
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [ratingSavingIds, setRatingSavingIds] = useState([]);
   const videoSourcesRef = useRef({});
+  const modalContentRef = useRef(null);
+  const dragStateRef = useRef({ dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 });
 
   const fetchGallery = async (options = {}) => {
     const nextImagePage = Number.isInteger(options.imagePage) && options.imagePage > 0 ? options.imagePage : imagePage;
@@ -73,6 +85,9 @@ export default function ImageGallery({ isActive = false }) {
     const imageSkip = (nextImagePage - 1) * imagePageSize;
     const videoSkip = (nextVideoPage - 1) * videoPageSize;
     const imageParams = new URLSearchParams({ skip: String(imageSkip), limit: String(imagePageSize) });
+    if (imageSort === 'rating') {
+      imageParams.set('sort', 'rating');
+    }
     const videoParams = new URLSearchParams({ skip: String(videoSkip), limit: String(videoPageSize) });
 
     setBusy(true);
@@ -378,6 +393,7 @@ export default function ImageGallery({ isActive = false }) {
       setPreviewId(images[previewIndex - 1].id);
     }
     setZoomLevel(1);
+    setPanOffset({ x: 0, y: 0 });
   };
 
   const showNext = () => {
@@ -392,12 +408,14 @@ export default function ImageGallery({ isActive = false }) {
       setPreviewId(images[previewIndex + 1].id);
     }
     setZoomLevel(1);
+    setPanOffset({ x: 0, y: 0 });
   };
 
   const openPreview = (imageId) => {
     if (!imageId) return;
     setPreviewId(imageId);
     setZoomLevel(1);
+    setPanOffset({ x: 0, y: 0 });
     setIsPreviewOpen(true);
   };
 
@@ -422,7 +440,7 @@ export default function ImageGallery({ isActive = false }) {
     if (token && isActive) {
       fetchGallery();
     }
-  }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize]);
+  }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize, imageSort]);
 
   useEffect(() => {
     if (!isPreviewOpen) return undefined;
@@ -503,8 +521,121 @@ export default function ImageGallery({ isActive = false }) {
   }, []);
 
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(3, Math.round((prev + 0.25) * 100) / 100));
-  const handleZoomOut = () => setZoomLevel((prev) => Math.max(1, Math.round((prev - 0.25) * 100) / 100));
-  const handleZoomReset = () => setZoomLevel(1);
+  const handleZoomOut = () => {
+    setZoomLevel((prev) => {
+      const next = Math.max(1, Math.round((prev - 0.25) * 100) / 100);
+      if (next === 1) setPanOffset({ x: 0, y: 0 });
+      return next;
+    });
+  };
+  const handleZoomReset = () => {
+    setZoomLevel(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  const handleWheelZoom = (event) => {
+    event.preventDefault();
+    const delta = event.deltaY < 0 ? 0.25 : -0.25;
+    setZoomLevel((prev) => {
+      const next = Math.min(3, Math.max(1, Math.round((prev + delta) * 100) / 100));
+      if (next === 1) setPanOffset({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const handlePanStart = (event) => {
+    if (zoomLevel <= 1) return;
+    const point = event.touches ? event.touches[0] : event;
+    dragStateRef.current = {
+      dragging: true,
+      startX: point.clientX,
+      startY: point.clientY,
+      originX: panOffset.x,
+      originY: panOffset.y,
+    };
+  };
+
+  const handlePanMove = (event) => {
+    if (!dragStateRef.current.dragging || zoomLevel <= 1) return;
+    const point = event.touches ? event.touches[0] : event;
+    const dx = point.clientX - dragStateRef.current.startX;
+    const dy = point.clientY - dragStateRef.current.startY;
+    setPanOffset({
+      x: dragStateRef.current.originX + dx,
+      y: dragStateRef.current.originY + dy,
+    });
+  };
+
+  const handlePanEnd = () => {
+    dragStateRef.current.dragging = false;
+  };
+
+  const downloadImage = (item) => {
+    if (!item?.data) return;
+    try {
+      const byteChars = atob(item.data);
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i += 1) {
+        byteNumbers[i] = byteChars.charCodeAt(i);
+      }
+      const blob = new Blob([new Uint8Array(byteNumbers)], { type: item.mime_type || 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = item.filename || `generated-${item.id}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert('Failed to download image: ' + error.message);
+    }
+  };
+
+  const toggleFullscreen = () => {
+    const node = modalContentRef.current;
+    if (!node) return;
+    if (!document.fullscreenElement) {
+      node.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const rateImage = async (imageId, rawValue) => {
+    if (!imageId) return;
+    const value = rawValue === null ? null : Math.round(rawValue * 10) / 10;
+    setRatingSavingIds((prev) => (prev.includes(imageId) ? prev : [...prev, imageId]));
+    // Optimistic local update for cards, preview, and forced preview.
+    setImages((prev) => prev.map((img) => (img.id === imageId ? { ...img, rating: value } : img)));
+    setForcedPreview((prev) => (prev && prev.id === imageId ? { ...prev, rating: value } : prev));
+    try {
+      const response = await fetch(`${apiBaseUrl}/images/generated/${imageId}/rating`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: value }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.detail || 'Failed to save rating');
+      }
+    } catch (error) {
+      alert('Error: ' + error.message);
+      // Reload to resync on failure.
+      fetchGallery();
+    } finally {
+      setRatingSavingIds((prev) => prev.filter((id) => id !== imageId));
+    }
+  };
 
   const tabIndex = activeType === 'images' ? 0 : 1;
 
@@ -558,6 +689,18 @@ export default function ImageGallery({ isActive = false }) {
                 >
                   Delete selected ({selectedImageIds.length})
                 </Button>
+                <Select
+                  value={imageSort}
+                  onChange={(event) => {
+                    setImageSort(event.target.value);
+                    setImagePage(1);
+                  }}
+                  isDisabled={busy || deleting}
+                  maxW="180px"
+                >
+                  <option value="recent">Newest first</option>
+                  <option value="rating">Highest rated</option>
+                </Select>
               </HStack>
 
               <Divider my={4} />
@@ -604,9 +747,17 @@ export default function ImageGallery({ isActive = false }) {
                           <Text fontSize="sm" color="gray.500">
                             Model: {modelLabel(item.face_model_id)}
                           </Text>
-                          <Text fontSize="sm" color="gray.500">
-                            Restore: {item.restore ? 'Yes' : 'No'}
-                          </Text>
+                          <HStack justify="space-between">
+                            <Text fontSize="sm" color="gray.500">
+                              Restore: {item.restore ? 'Yes' : 'No'}
+                            </Text>
+                            <HStack spacing={1} color={item.rating ? 'yellow.300' : 'gray.600'}>
+                              <StarIcon boxSize={3} />
+                              <Text fontSize="sm">
+                                {item.rating ? Number(item.rating).toFixed(1) : '—'}
+                              </Text>
+                            </HStack>
+                          </HStack>
                           <HStack spacing={2}>
                             <Button size="sm" variant="outline" onClick={() => openPreview(item.id)}>
                               Preview
@@ -827,29 +978,116 @@ export default function ImageGallery({ isActive = false }) {
       <Modal
         isOpen={isPreviewOpen}
         onClose={() => {
+          if (document.fullscreenElement) {
+            document.exitFullscreen?.().catch(() => {});
+          }
           setPreviewId(null);
           setForcedPreview(null);
           setIsPreviewOpen(false);
           setZoomLevel(1);
+          setPanOffset({ x: 0, y: 0 });
         }}
         size="6xl"
       >
         <ModalOverlay />
-        <ModalContent bg="#0b0f1a" marginY={6}>
-          <ModalCloseButton />
+        <ModalContent ref={modalContentRef} bg="#0b0f1a" marginY={6}>
+          <ModalCloseButton zIndex={2} />
           <ModalBody py={6}>
             {activePreview && !busy && !deleting ? (
-              <Stack spacing={2} align="center">
-                <Box h="70vh" alignContent="center">
+              <Stack spacing={3} align="stretch">
+                <Box
+                  h="70vh"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  overflow="hidden"
+                  onWheel={handleWheelZoom}
+                  onMouseDown={handlePanStart}
+                  onMouseMove={handlePanMove}
+                  onMouseUp={handlePanEnd}
+                  onMouseLeave={handlePanEnd}
+                  onTouchStart={handlePanStart}
+                  onTouchMove={handlePanMove}
+                  onTouchEnd={handlePanEnd}
+                  cursor={zoomLevel > 1 ? (dragStateRef.current.dragging ? 'grabbing' : 'grab') : 'default'}
+                >
                   <Box
                     as="img"
                     src={`data:image/jpeg;base64,${activePreview.data}`}
                     alt="Preview"
                     maxH="70vh"
-                    style={{ transform: `scale(${zoomLevel})`, transition: 'transform 120ms ease-out' }}
+                    draggable={false}
+                    style={{
+                      transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
+                      transition: dragStateRef.current.dragging ? 'none' : 'transform 120ms ease-out',
+                    }}
                   />
                 </Box>
-                <HStack spacing={1}>
+
+                {/* Metadata + rating panel */}
+                <Box
+                  bg="#0f141f"
+                  border="1px solid"
+                  borderColor="#1e2636"
+                  borderRadius="12px"
+                  p={4}
+                >
+                  <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                    <Stack spacing={1} fontSize="sm" color="gray.400">
+                      <Text>
+                        <Text as="span" color="gray.500">ID:</Text> #{activePreview.id}
+                      </Text>
+                      <Text>
+                        <Text as="span" color="gray.500">Model:</Text> {modelLabel(activePreview.face_model_id)}
+                      </Text>
+                      <Text>
+                        <Text as="span" color="gray.500">Restore:</Text> {activePreview.restore ? 'Yes' : 'No'}
+                      </Text>
+                      <Text>
+                        <Text as="span" color="gray.500">Source image:</Text>{' '}
+                        {activePreview.input_image_id ? `#${activePreview.input_image_id}` : '— (not saved)'}
+                      </Text>
+                    </Stack>
+                    <Stack spacing={2}>
+                      <HStack justify="space-between">
+                        <Text fontSize="sm" color="gray.400">Rating</Text>
+                        <HStack spacing={1} color={activePreview.rating ? 'yellow.300' : 'gray.600'}>
+                          <StarIcon boxSize={3} />
+                          <Text fontSize="sm" fontWeight="bold">
+                            {activePreview.rating ? Number(activePreview.rating).toFixed(1) : 'Unrated'}
+                          </Text>
+                        </HStack>
+                      </HStack>
+                      <Slider
+                        min={1}
+                        max={10}
+                        step={0.1}
+                        value={activePreview.rating || 1}
+                        onChangeEnd={(val) => rateImage(activePreview.id, val)}
+                        isDisabled={ratingSavingIds.includes(activePreview.id)}
+                        aria-label="rating"
+                      >
+                        <SliderTrack bg="whiteAlpha.200">
+                          <SliderFilledTrack bg="yellow.400" />
+                        </SliderTrack>
+                        <SliderThumb boxSize={4} />
+                      </Slider>
+                      <HStack justify="space-between">
+                        <Text fontSize="xs" color="gray.500">1 – 10</Text>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => rateImage(activePreview.id, null)}
+                          isDisabled={!activePreview.rating || ratingSavingIds.includes(activePreview.id)}
+                        >
+                          Clear
+                        </Button>
+                      </HStack>
+                    </Stack>
+                  </SimpleGrid>
+                </Box>
+
+                <HStack spacing={1} justify="center" flexWrap="wrap">
                   {!isForcedPreview && (
                     <IconButton
                       variant="outline"
@@ -882,11 +1120,7 @@ export default function ImageGallery({ isActive = false }) {
                     icon={<MinusIcon />}
                     onClick={handleZoomOut}
                   />
-                  <Text color="gray.500"
-                    fontSize="sm"
-                    minW="20px"
-                    textAlign="center"
-                  >
+                  <Text color="gray.500" fontSize="sm" minW="40px" textAlign="center">
                     {Math.round(zoomLevel * 100)}%
                   </Text>
                   <IconButton
@@ -895,8 +1129,19 @@ export default function ImageGallery({ isActive = false }) {
                     icon={<AddIcon />}
                     onClick={handleZoomIn}
                   />
-                </HStack>
-                <HStack spacing={1}>
+                  <IconButton
+                    variant="outline"
+                    aria-label="Download image"
+                    icon={<DownloadIcon />}
+                    onClick={() => downloadImage(activePreview)}
+                  />
+                  <IconButton
+                    variant="outline"
+                    aria-label="Toggle fullscreen"
+                    icon={<RepeatIcon />}
+                    onClick={toggleFullscreen}
+                    colorScheme={isFullscreen ? 'brand' : undefined}
+                  />
                   <IconButton
                     variant="outline"
                     colorScheme="red"
@@ -914,6 +1159,37 @@ export default function ImageGallery({ isActive = false }) {
                     isDisabled={busy || deleting || !activePreview.input_image_id}
                   />
                 </HStack>
+
+                {/* Thumbnail filmstrip */}
+                {!isForcedPreview && images.length > 1 && (
+                  <HStack spacing={2} overflowX="auto" py={2} px={1}>
+                    {images.map((thumb) => (
+                      <Box
+                        key={thumb.id}
+                        flex="0 0 auto"
+                        borderRadius="8px"
+                        overflow="hidden"
+                        border="2px solid"
+                        borderColor={thumb.id === activePreview.id ? 'brand.400' : 'transparent'}
+                        cursor="pointer"
+                        onClick={() => {
+                          setPreviewId(thumb.id);
+                          setZoomLevel(1);
+                          setPanOffset({ x: 0, y: 0 });
+                        }}
+                      >
+                        <Image
+                          src={`data:image/jpeg;base64,${thumb.data}`}
+                          alt={`Thumbnail #${thumb.id}`}
+                          h="56px"
+                          w="56px"
+                          objectFit="cover"
+                          opacity={thumb.id === activePreview.id ? 1 : 0.6}
+                        />
+                      </Box>
+                    ))}
+                  </HStack>
+                )}
               </Stack>
             ) : (
               <Box display="flex" justifyContent="center" alignItems="center" minH="400px">

@@ -16,6 +16,7 @@ from PIL import Image
 from safetensors.numpy import load as load_safetensor, save as save_safetensor
 
 from .face_swap import FaceSwapService, GENDER_FEMALE, GENDER_MALE, SWAP_MODEL_INSWAPPER, VALID_SWAP_MODELS
+from .model_registry import get_model_registry
 from .observability import configure_logging, get_logger, timed_log
 
 
@@ -115,7 +116,7 @@ def _post_generated_video(
             headers=headers,
             data=data,
             files={"file": (filename, output_bytes, mime_type)},
-            timeout=120,
+            timeout=None,  # large finished videos must never be cut off mid-upload
         )
         if response.status_code >= 400:
             logger.warning(
@@ -222,6 +223,21 @@ def create_app() -> FastAPI:
             },
         )
         return response
+
+    @app.get("/health")
+    async def health():
+        # Reports reachability and whether the core models are already loaded.
+        # Does NOT trigger a load, so it stays cheap; merely hitting this route is
+        # enough to wake a sleeping Hugging Face Space.
+        registry = get_model_registry()
+        models_loaded = registry._models is not None
+        return {"status": "ok", "models_loaded": models_loaded}
+
+    @app.post("/warmup")
+    async def warmup():
+        # Forces model initialization so the first real swap isn't slow.
+        get_model_registry().get_models()
+        return {"status": "ok", "models_loaded": True}
 
     @app.post("/swap-remote")
     async def swap_remote(

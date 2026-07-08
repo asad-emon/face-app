@@ -24,6 +24,7 @@ export default function ModelSelector() {
     selectedModelId,
     enableRestore,
     setEnableRestore,
+    expressionRestoreEnabled,
     expressionStrength,
     setExpressionStrength,
     swapModel,
@@ -80,13 +81,15 @@ export default function ModelSelector() {
         </Select>
       </FormControl>
 
-      <Checkbox
-        isChecked={enableRestore}
-        onChange={(event) => setEnableRestore(event.target.checked)}
-        isDisabled={controlsDisabled}
-      >
-        Enable face restore for sharper details and more stable expressions
-      </Checkbox>
+      {expressionRestoreEnabled && (
+        <Checkbox
+          isChecked={enableRestore}
+          onChange={(event) => setEnableRestore(event.target.checked)}
+          isDisabled={controlsDisabled}
+        >
+          Enable face restore for sharper details and more stable expressions
+        </Checkbox>
+      )}
 
       <Box>
         <Text fontSize="sm" mb={4} color="gray.300">

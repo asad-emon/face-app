@@ -81,6 +81,7 @@ class ModelRegistry:
     def preload_assets(self) -> None:
         self.get_models()
         self.get_gpen_session()
+        self.get_hyperswap_session()
         logger.info("preload_complete", extra={"event": "preload_complete"})
 
     def get_models(self) -> ModelTuple:

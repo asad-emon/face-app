@@ -4,6 +4,7 @@ import { requireInferenceAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
 import { uploadBuffer, deleteFile } from "../services/storage.js";
+import { deleteVideoInputIfNotSaved } from "../services/swapService.js";
 
 const router = express.Router();
 
@@ -83,6 +84,9 @@ router.post(
         logApiError(`POST /internal/videos/${id}/content cleanup ${previousDriveId}`, err)
       );
     }
+
+    // Drop the stored input video when the owner disabled input-file saving.
+    await deleteVideoInputIfNotSaved(video, owner);
 
     return res.json({ id: video.id, processing: false });
   }
