@@ -152,6 +152,16 @@ export default function ImageGallery({ isActive = false }) {
     }
   };
 
+  const refreshGallery = () => {
+    // New items always land on page 1 (server sorts by newest id first), so
+    // reset pagination before re-fetching. Setting the page state also keeps
+    // the pagination UI in sync; when already on page 1 the explicit fetch
+    // below still pulls the latest data.
+    setImagePage(1);
+    setVideoPage(1);
+    fetchGallery({ imagePage: 1, videoPage: 1 });
+  };
+
   const deleteImages = async (ids) => {
     if (ids.length === 0) return;
     setDeleting(true);
@@ -654,7 +664,7 @@ export default function ImageGallery({ isActive = false }) {
             <Heading size="md">Generated Media</Heading>
             <Text color="gray.500">Review outputs and manage your gallery.</Text>
           </Box>
-          <Button onClick={() => fetchGallery()} isDisabled={busy || deleting} variant="outline">
+          <Button onClick={() => refreshGallery()} isDisabled={busy || deleting} variant="outline">
             Refresh
           </Button>
         </HStack>
@@ -1059,10 +1069,11 @@ export default function ImageGallery({ isActive = false }) {
                         </HStack>
                       </HStack>
                       <Slider
+                        key={activePreview.id}
                         min={1}
                         max={10}
                         step={0.1}
-                        value={activePreview.rating || 1}
+                        defaultValue={activePreview.rating || 1}
                         onChangeEnd={(val) => rateImage(activePreview.id, val)}
                         isDisabled={ratingSavingIds.includes(activePreview.id)}
                         aria-label="rating"
