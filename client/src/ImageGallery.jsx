@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  Collapse,
   Divider,
   Heading,
   HStack,
@@ -75,6 +76,7 @@ export default function ImageGallery({ isActive = false }) {
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [ratingSavingIds, setRatingSavingIds] = useState([]);
+  const [showRating, setShowRating] = useState(false);
   const videoSourcesRef = useRef({});
   const modalContentRef = useRef(null);
   const dragStateRef = useRef({ dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 });
@@ -451,6 +453,11 @@ export default function ImageGallery({ isActive = false }) {
       fetchGallery();
     }
   }, [token, isActive, imagePage, videoPage, imagePageSize, videoPageSize, imageSort]);
+
+  // The rating panel starts collapsed every time the preview is reopened.
+  useEffect(() => {
+    if (!isPreviewOpen) setShowRating(false);
+  }, [isPreviewOpen]);
 
   useEffect(() => {
     if (!isPreviewOpen) return undefined;
@@ -1034,70 +1041,6 @@ export default function ImageGallery({ isActive = false }) {
                   />
                 </Box>
 
-                {/* Metadata + rating panel */}
-                <Box
-                  bg="#0f141f"
-                  border="1px solid"
-                  borderColor="#1e2636"
-                  borderRadius="12px"
-                  p={4}
-                >
-                  <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                    <Stack spacing={1} fontSize="sm" color="gray.400">
-                      <Text>
-                        <Text as="span" color="gray.500">ID:</Text> #{activePreview.id}
-                      </Text>
-                      <Text>
-                        <Text as="span" color="gray.500">Model:</Text> {modelLabel(activePreview.face_model_id)}
-                      </Text>
-                      <Text>
-                        <Text as="span" color="gray.500">Restore:</Text> {activePreview.restore ? 'Yes' : 'No'}
-                      </Text>
-                      <Text>
-                        <Text as="span" color="gray.500">Source image:</Text>{' '}
-                        {activePreview.input_image_id ? `#${activePreview.input_image_id}` : '— (not saved)'}
-                      </Text>
-                    </Stack>
-                    <Stack spacing={2}>
-                      <HStack justify="space-between">
-                        <Text fontSize="sm" color="gray.400">Rating</Text>
-                        <HStack spacing={1} color={activePreview.rating ? 'yellow.300' : 'gray.600'}>
-                          <StarIcon boxSize={3} />
-                          <Text fontSize="sm" fontWeight="bold">
-                            {activePreview.rating ? Number(activePreview.rating).toFixed(1) : 'Unrated'}
-                          </Text>
-                        </HStack>
-                      </HStack>
-                      <Slider
-                        key={activePreview.id}
-                        min={1}
-                        max={10}
-                        step={0.1}
-                        defaultValue={activePreview.rating || 1}
-                        onChangeEnd={(val) => rateImage(activePreview.id, val)}
-                        isDisabled={ratingSavingIds.includes(activePreview.id)}
-                        aria-label="rating"
-                      >
-                        <SliderTrack bg="whiteAlpha.200">
-                          <SliderFilledTrack bg="yellow.400" />
-                        </SliderTrack>
-                        <SliderThumb boxSize={4} />
-                      </Slider>
-                      <HStack justify="space-between">
-                        <Text fontSize="xs" color="gray.500">1 – 10</Text>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => rateImage(activePreview.id, null)}
-                          isDisabled={!activePreview.rating || ratingSavingIds.includes(activePreview.id)}
-                        >
-                          Clear
-                        </Button>
-                      </HStack>
-                    </Stack>
-                  </SimpleGrid>
-                </Box>
-
                 <HStack spacing={1} justify="center" flexWrap="wrap">
                   {!isForcedPreview && (
                     <IconButton
@@ -1142,6 +1085,15 @@ export default function ImageGallery({ isActive = false }) {
                   />
                   <IconButton
                     variant="outline"
+                    aria-label={showRating ? 'Hide rating' : 'Rate image'}
+                    title={activePreview.rating ? `Rated ${Number(activePreview.rating).toFixed(1)}` : 'Unrated'}
+                    icon={<StarIcon />}
+                    onClick={() => setShowRating((prev) => !prev)}
+                    color={activePreview.rating ? 'yellow.300' : undefined}
+                    colorScheme={showRating ? 'brand' : undefined}
+                  />
+                  <IconButton
+                    variant="outline"
                     aria-label="Download image"
                     icon={<DownloadIcon />}
                     onClick={() => downloadImage(activePreview)}
@@ -1170,6 +1122,55 @@ export default function ImageGallery({ isActive = false }) {
                     isDisabled={busy || deleting || !activePreview.input_image_id}
                   />
                 </HStack>
+
+                {/* Rating panel, toggled by the star button above */}
+                <Collapse in={showRating} animateOpacity>
+                  <Box
+                    bg="#0f141f"
+                    border="1px solid"
+                    borderColor="#1e2636"
+                    borderRadius="12px"
+                    p={4}
+                  >
+                    <Stack spacing={2}>
+                      <HStack justify="space-between">
+                        <Text fontSize="sm" color="gray.400">Rating</Text>
+                        <HStack spacing={1} color={activePreview.rating ? 'yellow.300' : 'gray.600'}>
+                          <StarIcon boxSize={3} />
+                          <Text fontSize="sm" fontWeight="bold">
+                            {activePreview.rating ? Number(activePreview.rating).toFixed(1) : 'Unrated'}
+                          </Text>
+                        </HStack>
+                      </HStack>
+                      <Slider
+                        key={activePreview.id}
+                        min={1}
+                        max={10}
+                        step={0.1}
+                        defaultValue={activePreview.rating || 1}
+                        onChangeEnd={(val) => rateImage(activePreview.id, val)}
+                        isDisabled={ratingSavingIds.includes(activePreview.id)}
+                        aria-label="rating"
+                      >
+                        <SliderTrack bg="whiteAlpha.200">
+                          <SliderFilledTrack bg="yellow.400" />
+                        </SliderTrack>
+                        <SliderThumb boxSize={4} />
+                      </Slider>
+                      <HStack justify="space-between">
+                        <Text fontSize="xs" color="gray.500">1 – 10</Text>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => rateImage(activePreview.id, null)}
+                          isDisabled={!activePreview.rating || ratingSavingIds.includes(activePreview.id)}
+                        >
+                          Clear
+                        </Button>
+                      </HStack>
+                    </Stack>
+                  </Box>
+                </Collapse>
 
                 {/* Thumbnail filmstrip */}
                 {!isForcedPreview && images.length > 1 && (

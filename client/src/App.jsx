@@ -111,7 +111,7 @@ export default function App() {
           variant="enclosed"
           colorScheme="brand"
         >
-          <TabList>
+          <TabList overflowX={'scroll'} overflowY={'hidden'} flexWrap="nowrap" gap={2}>
             {tabs.map((item) => (
               <Tab key={item.id}>{item.label}</Tab>
             ))}

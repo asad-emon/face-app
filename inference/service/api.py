@@ -18,10 +18,33 @@ from safetensors.numpy import load as load_safetensor, save as save_safetensor
 from .face_swap import FaceSwapService, GENDER_FEMALE, GENDER_MALE, SWAP_MODEL_INSWAPPER, VALID_SWAP_MODELS
 from .model_registry import get_model_registry
 from .observability import configure_logging, get_logger, timed_log
+from .settings import get_settings
+from .video_swap import resolve_worker_count, swap_video_frames
 
 
 def _parse_form_bool(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _encode_output_image(image: Image.Image, output_format: Optional[str]) -> Response:
+    """Encode the swapped image, defaulting to high-quality JPEG.
+
+    Chroma subsampling is disabled: at the blend edge and across skin it does
+    more visible damage than the quality factor does.
+    """
+    buffered = io.BytesIO()
+    if (output_format or "").strip().lower() == "png":
+        image.save(buffered, format="PNG", optimize=True)
+        return Response(content=buffered.getvalue(), media_type="image/png")
+
+    image.save(
+        buffered,
+        format="JPEG",
+        quality=get_settings().output_jpeg_quality,
+        subsampling=0,
+        optimize=True,
+    )
+    return Response(content=buffered.getvalue(), media_type="image/jpeg")
 
 
 def _gender_from_tensor(tensors: dict) -> Optional[str]:
@@ -249,22 +272,20 @@ def create_app() -> FastAPI:
         apply_hair: str = Form("0"),
         manual_gender: Optional[str] = Form(None),
         swap_model: Optional[str] = Form(None),
+        output_format: Optional[str] = Form(None),
         model_file: UploadFile = File(...),
         target_image: UploadFile = File(...),
     ):
-        del model_id
+        # preserve_expression / preserve_target_expression /
+        # target_expression_strength / apply_hair are accepted and ignored:
+        # the post-processing they drove degraded the result and was removed,
+        # but existing API clients still send them.
+        del model_id, preserve_expression, preserve_target_expression
+        del target_expression_strength, apply_hair
         restore_enabled = _parse_form_bool(enable_restore)
-        preserve_expression_enabled = _parse_form_bool(preserve_expression)
-        preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
-        apply_hair_enabled = _parse_form_bool(apply_hair)
         effective_swap_model = SWAP_MODEL_INSWAPPER
         if swap_model and swap_model.strip().lower() in VALID_SWAP_MODELS:
             effective_swap_model = swap_model.strip().lower()
-        try:
-            expression_strength = float(target_expression_strength)
-            expression_strength = max(0.0, min(1.0, expression_strength))
-        except (ValueError, TypeError):
-            expression_strength = 0.85
         model_bytes = await model_file.read()
         target_bytes = await target_image.read()
 
@@ -277,7 +298,6 @@ def create_app() -> FastAPI:
             with timed_log(logger, "parse_model_file"):
                 tensors = load_safetensor(model_bytes)
                 source_embedding = tensors.get("embedding")
-                source_expression_template = tensors.get("source_expression_template")
                 source_gender = _gender_from_tensor(tensors)
         except Exception as exc:
             logger.warning(
@@ -311,7 +331,6 @@ def create_app() -> FastAPI:
                 "source_gender": source_gender,
                 "manual_gender": manual_gender,
                 "effective_gender": effective_gender,
-                "apply_hair": apply_hair_enabled,
                 "restore": restore_enabled,
             },
         )
@@ -321,18 +340,11 @@ def create_app() -> FastAPI:
                 target_pil,
                 source_embedding,
                 enable_restore=restore_enabled,
-                preserve_source_expression=preserve_expression_enabled,
-                source_expression_template=source_expression_template,
-                preserve_target_expression=preserve_target_expression_enabled,
-                target_expression_strength=expression_strength,
                 source_gender=effective_gender,
-                apply_hair=apply_hair_enabled,
                 swap_model=effective_swap_model,
             )
-        buffered = io.BytesIO()
         with timed_log(logger, "encode_output_image"):
-            output_image.save(buffered, format="JPEG")
-        return Response(content=buffered.getvalue(), media_type="image/jpeg")
+            return _encode_output_image(output_image, output_format)
 
     @app.post("/embedding")
     async def create_embedding(files: List[UploadFile] = File(..., alias="file")):
@@ -340,7 +352,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="No files provided")
 
         embeddings = []
-        source_expression_template = None
         detected_genders = []
 
         with timed_log(logger, "embedding_batch", file_count=len(files)):
@@ -354,22 +365,22 @@ def create_app() -> FastAPI:
                 except Exception:
                     continue
 
-                embedding, expression_template, gender = swap_service.extract_face_features(image)
+                embedding, gender = swap_service.extract_face_features(image)
                 if embedding is not None:
                     embeddings.append(embedding)
-                    if source_expression_template is None and expression_template is not None:
-                        source_expression_template = expression_template
                     if gender is not None:
                         detected_genders.append(gender)
 
         if not embeddings:
             raise HTTPException(status_code=400, detail="No faces found in uploaded images")
 
+        # The mean of unit vectors is not itself a unit vector; renormalise so
+        # the stored embedding matches what a single-image capture produces.
         avg_embedding = np.mean(embeddings, axis=0)
+        avg_norm = np.linalg.norm(avg_embedding)
+        if avg_norm > 0:
+            avg_embedding = avg_embedding / avg_norm
         tensors = {"embedding": avg_embedding.astype(np.float32)}
-
-        if source_expression_template is not None:
-            tensors["source_expression_template"] = source_expression_template.astype(np.float32)
 
         # Store majority-vote gender as a float32 scalar: 1.0 = male, 0.0 = female
         if detected_genders:
@@ -406,19 +417,14 @@ def create_app() -> FastAPI:
         model_file: UploadFile = File(...),
         target_video: UploadFile = File(...),
     ):
-        del model_id
+        # See /swap-remote: the expression and hair form fields are accepted
+        # for compatibility and ignored.
+        del model_id, preserve_expression, preserve_target_expression
+        del target_expression_strength, apply_hair
         restore_enabled = _parse_form_bool(enable_restore)
-        preserve_expression_enabled = _parse_form_bool(preserve_expression)
-        preserve_target_expression_enabled = _parse_form_bool(preserve_target_expression)
-        apply_hair_enabled = _parse_form_bool(apply_hair)
         effective_swap_model = SWAP_MODEL_INSWAPPER
         if swap_model and swap_model.strip().lower() in VALID_SWAP_MODELS:
             effective_swap_model = swap_model.strip().lower()
-        try:
-            expression_strength = float(target_expression_strength)
-            expression_strength = max(0.0, min(1.0, expression_strength))
-        except (ValueError, TypeError):
-            expression_strength = 0.85
         model_bytes = await model_file.read()
         target_bytes = await target_video.read()
 
@@ -431,7 +437,6 @@ def create_app() -> FastAPI:
             with timed_log(logger, "parse_model_file_video"):
                 tensors = load_safetensor(model_bytes)
                 source_embedding = tensors.get("embedding")
-                source_expression_template = tensors.get("source_expression_template")
                 source_gender = _gender_from_tensor(tensors)
         except Exception as exc:
             logger.warning(
@@ -494,11 +499,9 @@ def create_app() -> FastAPI:
             if not writer.isOpened():
                 raise HTTPException(status_code=500, detail="Failed to initialize video writer")
 
-            frame_count = 0
             report_every = 30
             if total_frames:
                 report_every = max(1, int(total_frames * 0.02))
-            last_reported = 0
             if progress_url:
                 _post_video_progress(
                     progress_url=progress_url,
@@ -507,34 +510,52 @@ def create_app() -> FastAPI:
                     callback_token=callback_token,
                     logger=logger,
                 )
-            with timed_log(logger, "swap_remote_video_inference", restore_enabled=restore_enabled):
-                while True:
-                    ok, frame = cap.read()
-                    if not ok:
-                        break
-                    swapped = swap_service.swap_frame_with_embedding(
-                        frame,
-                        source_embedding,
-                        enable_restore=restore_enabled,
-                        preserve_source_expression=preserve_expression_enabled,
-                        source_expression_template=source_expression_template,
-                        preserve_target_expression=preserve_target_expression_enabled,
-                        target_expression_strength=expression_strength,
-                        source_gender=effective_gender,
-                        apply_hair=apply_hair_enabled,
-                        swap_model=effective_swap_model,
-                    )
-                    writer.write(swapped)
-                    frame_count += 1
-                    if progress_url and (frame_count == total_frames or frame_count - last_reported >= report_every):
-                        _post_video_progress(
-                            progress_url=progress_url,
-                            processed_frames=frame_count,
-                            total_frames=total_frames,
-                            callback_token=callback_token,
-                            logger=logger,
-                        )
-                        last_reported = frame_count
+
+            def report_progress(processed: int) -> None:
+                if not progress_url:
+                    return
+                _post_video_progress(
+                    progress_url=progress_url,
+                    processed_frames=processed,
+                    total_frames=total_frames,
+                    callback_token=callback_token,
+                    logger=logger,
+                )
+
+            def swap_one(frame):
+                return swap_service.swap_frame_with_embedding(
+                    frame,
+                    source_embedding,
+                    enable_restore=restore_enabled,
+                    source_gender=effective_gender,
+                    swap_model=effective_swap_model,
+                )
+
+            # Every frame is the same size, so the detector only needs
+            # configuring once - do it before the workers start rather than
+            # from inside them.
+            with timed_log(logger, "warmup_video_models"):
+                get_model_registry().warmup_for_frames(
+                    (height, width),
+                    restore=restore_enabled,
+                    hyperswap=effective_swap_model != SWAP_MODEL_INSWAPPER,
+                )
+
+            worker_count = resolve_worker_count(get_settings().video_worker_count)
+            with timed_log(
+                logger,
+                "swap_remote_video_inference",
+                restore_enabled=restore_enabled,
+                worker_count=worker_count,
+            ):
+                frame_count = swap_video_frames(
+                    cap,
+                    writer,
+                    swap_one,
+                    worker_count=worker_count,
+                    on_progress=report_progress if progress_url else None,
+                    progress_every=report_every,
+                )
 
             if frame_count == 0:
                 raise HTTPException(status_code=400, detail="Video has no readable frames")
