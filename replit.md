@@ -10,7 +10,7 @@ A multi-component face-swapping web application using AI.
 
 ## Tech Stack
 
-- **Frontend**: React 18, Vite, Chakra UI, Firebase (auth/storage)
+- **Frontend**: React 18, Vite, Chakra UI
 - **Backend**: Node.js, Express, Mongoose ODM, MongoDB Atlas
 - **Inference**: Python, FastAPI, InsightFace, ONNX Runtime, OpenCV
 
