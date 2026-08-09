@@ -1,5 +1,5 @@
-import React from 'react';
-import { Badge, Box, Button, SimpleGrid, Stack, Text } from '@chakra-ui/react';
+import React, { useState } from 'react';
+import { Badge, Box, Button, Input, SimpleGrid, Stack, Text } from '@chakra-ui/react';
 import { useSwap } from '../SwapContext.jsx';
 
 function statusLabel(status) {
@@ -23,6 +23,7 @@ export default function TargetImageQueue() {
     addFiles,
     removeImage,
     clearImages,
+    addImageFromUrl,
     handleSwap,
     busy,
     processedCount,
@@ -31,6 +32,26 @@ export default function TargetImageQueue() {
     selectedModelId,
     controlsDisabled,
   } = useSwap();
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageUrlBusy, setImageUrlBusy] = useState(false);
+  const [imageUrlError, setImageUrlError] = useState('');
+
+  const handleAddImageUrl = async () => {
+    if (!imageUrl.trim()) {
+      setImageUrlError('Enter an Instagram image or post URL.');
+      return;
+    }
+    setImageUrlBusy(true);
+    setImageUrlError('');
+    try {
+      await addImageFromUrl(imageUrl);
+      setImageUrl('');
+    } catch (error) {
+      setImageUrlError(error.message || 'Failed to add Instagram image.');
+    } finally {
+      setImageUrlBusy(false);
+    }
+  };
 
   return (
     <Stack spacing={2}>
@@ -49,6 +70,42 @@ export default function TargetImageQueue() {
           />
         </Button>
       </Box>
+
+      <Box display="flex" gap={2} flexWrap="wrap">
+        <Input
+          flex="1"
+          minW={{ base: '100%', sm: '260px' }}
+          placeholder="Instagram image or post URL"
+          value={imageUrl}
+          onChange={(event) => {
+            setImageUrl(event.target.value);
+            setImageUrlError('');
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              void handleAddImageUrl();
+            }
+          }}
+          isDisabled={controlsDisabled || imageUrlBusy}
+        />
+        <Button
+          variant="outline"
+          onClick={() => void handleAddImageUrl()}
+          isLoading={imageUrlBusy}
+          isDisabled={controlsDisabled || !imageUrl.trim()}
+        >
+          Add Instagram Image
+        </Button>
+      </Box>
+      {imageUrlError && (
+        <Text fontSize="sm" color="red.300">
+          {imageUrlError}
+        </Text>
+      )}
+      <Text fontSize="xs" color="gray.500">
+        Paste an Instagram post URL or a direct Instagram image URL.
+      </Text>
 
       <Box display="flex" flexWrap="wrap" gap={3} alignItems="center" justifyContent="space-between">
         <Text fontSize="sm" color="gray.500">

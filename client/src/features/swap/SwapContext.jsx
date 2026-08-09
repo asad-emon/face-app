@@ -5,6 +5,7 @@ import {
   INPUT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
   buildVideoFileFromUrl,
+  buildInstagramImageFileFromUrl,
   getDefaultVersionId,
   groupByPerson,
   wait,
@@ -51,6 +52,8 @@ export function SwapProvider({ children }) {
   const [inputImageJobStatus, setInputImageJobStatus] = useState({});
   const [swapTab, setSwapTab] = useState('image');
   const targetImagesRef = useRef([]);
+  const videoPreviewItemsRef = useRef([]);
+  const videoResultUrlRef = useRef('');
 
   useEffect(() => {
     targetImagesRef.current = targetImages;
@@ -72,14 +75,22 @@ export function SwapProvider({ children }) {
   }, [settingsLoaded, expressionRestoreEnabled]);
 
   useEffect(() => {
+    videoPreviewItemsRef.current = videoPreviewItems;
+  }, [videoPreviewItems]);
+
+  useEffect(() => {
+    videoResultUrlRef.current = videoResultUrl;
+  }, [videoResultUrl]);
+
+  useEffect(() => {
     return () => {
       targetImagesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      videoPreviewItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      if (videoResultUrl) {
-        URL.revokeObjectURL(videoResultUrl);
+      videoPreviewItemsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      if (videoResultUrlRef.current) {
+        URL.revokeObjectURL(videoResultUrlRef.current);
       }
     };
-  }, [videoPreviewItems, videoResultUrl]);
+  }, []);
 
   const modelGroups = useMemo(() => groupByPerson(models), [models]);
   const selectedGroup = useMemo(
@@ -216,6 +227,14 @@ export function SwapProvider({ children }) {
     });
   }, []);
 
+  const addImageFromUrl = useCallback(
+    async (url) => {
+      const file = await buildInstagramImageFileFromUrl(url, token);
+      addFiles([file]);
+    },
+    [token, addFiles]
+  );
+
   const clearImages = useCallback(() => {
     setTargetImages((prev) => {
       prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
@@ -249,6 +268,25 @@ export function SwapProvider({ children }) {
           previewUrl: URL.createObjectURL(file),
         }))
       );
+    },
+    [videoPreviewItems, videoResultUrl]
+  );
+
+  const removeVideo = useCallback(
+    (id) => {
+      const current = videoPreviewItems.find((item) => item.id === id);
+      if (!current) return;
+
+      URL.revokeObjectURL(current.previewUrl);
+      const nextItems = videoPreviewItems.filter((item) => item.id !== id);
+      setVideoPreviewItems(nextItems);
+      setVideoFiles(nextItems.map((item) => item.file));
+      if (videoResultUrl) {
+        URL.revokeObjectURL(videoResultUrl);
+        setVideoResultUrl('');
+      }
+      setVideoError('');
+      setVideoProgress(0);
     },
     [videoPreviewItems, videoResultUrl]
   );
@@ -575,6 +613,7 @@ export function SwapProvider({ children }) {
       addFiles,
       removeImage,
       clearImages,
+      addImageFromUrl,
       handleSwap,
       busy,
       processedCount,
@@ -591,6 +630,7 @@ export function SwapProvider({ children }) {
       videoError,
       videoProgress,
       setVideoSelection,
+      removeVideo,
       clearVideoInput,
       handleVideoSwap,
       inputImages,
@@ -628,6 +668,7 @@ export function SwapProvider({ children }) {
       addFiles,
       removeImage,
       clearImages,
+      addImageFromUrl,
       handleSwap,
       busy,
       processedCount,
@@ -641,6 +682,7 @@ export function SwapProvider({ children }) {
       videoError,
       videoProgress,
       setVideoSelection,
+      removeVideo,
       clearVideoInput,
       handleVideoSwap,
       inputImages,

@@ -9,6 +9,7 @@ export default function VideoSwapSection() {
     videoUrl,
     setVideoUrl,
     setVideoSelection,
+    removeVideo,
     clearVideoInput,
     handleVideoSwap,
     videoBusy,
@@ -114,10 +115,21 @@ export default function VideoSwapSection() {
             Input videos
           </Text>
           {videoPreviewItems.map((item) => (
-            <Box key={item.id}>
-              <Text fontSize="sm" color="gray.500" mb={2} noOfLines={1}>
-                {item.file.name}
-              </Text>
+            <Box key={item.id} border="1px solid" borderColor="#1e2636" borderRadius="12px" p={3}>
+              <Box display="flex" alignItems="center" justifyContent="space-between" gap={2} mb={2}>
+                <Text fontSize="sm" color="gray.500" noOfLines={1}>
+                  {item.file.name}
+                </Text>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  colorScheme="red"
+                  onClick={() => removeVideo(item.id)}
+                  isDisabled={controlsDisabled}
+                >
+                  Remove
+                </Button>
+              </Box>
               <video src={item.previewUrl} controls style={{ maxWidth: '100%' }} />
             </Box>
           ))}

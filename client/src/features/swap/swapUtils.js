@@ -101,3 +101,39 @@ export async function buildVideoFileFromUrl(url) {
   }
   return new File([blob], filename, { type: contentType });
 }
+
+export async function buildInstagramImageFileFromUrl(url, token) {
+  const normalizedUrl = String(url || '').trim();
+  if (!normalizedUrl) {
+    throw new Error('Please enter an Instagram image URL.');
+  }
+
+  const response = await fetch(
+    `${apiBaseUrl}/instagram/image?url=${encodeURIComponent(normalizedUrl)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  if (!response.ok) {
+    let detail = 'Failed to fetch Instagram image.';
+    try {
+      const data = await response.json();
+      detail = data?.detail || detail;
+    } catch (_err) {
+      // Keep the friendly fallback when the API does not return JSON.
+    }
+    throw new Error(detail);
+  }
+
+  const blob = await response.blob();
+  const contentType = blob.type || 'image/jpeg';
+  const extension =
+    contentType === 'image/png'
+      ? 'png'
+      : contentType === 'image/webp'
+        ? 'webp'
+        : contentType === 'image/gif'
+          ? 'gif'
+          : 'jpg';
+  return new File([blob], `instagram-image.${extension}`, { type: contentType });
+}

@@ -1,4 +1,5 @@
 import express from "express";
+import axios from "axios";
 import { GeneratedImage, InputImage, SwapJob } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
@@ -16,6 +17,122 @@ import {
 } from "../services/storage.js";
 
 const router = express.Router();
+
+const INSTAGRAM_HOST_RE = /(^|\.)instagram\.com$|(^|\.)cdninstagram\.com$|(^|\.)fbcdn\.net$|(^|\.)fbsbx\.com$/i;
+const MAX_REMOTE_IMAGE_BYTES = 25 * 1024 * 1024;
+
+function isAllowedInstagramUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return url.protocol === "https:" && INSTAGRAM_HOST_RE.test(url.hostname);
+  } catch (_err) {
+    return false;
+  }
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function extractOgImage(html) {
+  const metaTags = String(html || "").match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of metaTags) {
+    const property = tag.match(/\b(?:property|name)\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (String(property || "").toLowerCase() !== "og:image") {
+      continue;
+    }
+    const content = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (content) {
+      return decodeHtmlEntities(content);
+    }
+  }
+  return "";
+}
+
+async function fetchInstagramImage(rawUrl) {
+  if (!isAllowedInstagramUrl(rawUrl)) {
+    const error = new Error("Only HTTPS Instagram image or post URLs are supported.");
+    error.status = 400;
+    throw error;
+  }
+
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (compatible; FaceAppImageImporter/1.0; +https://www.instagram.com/)",
+    Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+  };
+  const response = await axios.get(rawUrl, {
+    responseType: "arraybuffer",
+    headers,
+    maxContentLength: MAX_REMOTE_IMAGE_BYTES,
+    maxBodyLength: MAX_REMOTE_IMAGE_BYTES,
+    timeout: 20000,
+    validateStatus: (status) => status >= 200 && status < 400,
+  });
+  const contentType = String(response.headers["content-type"] || "").toLowerCase();
+
+  if (contentType.startsWith("image/")) {
+    return {
+      buffer: Buffer.from(response.data),
+      contentType: contentType.split(";")[0] || "image/jpeg",
+    };
+  }
+
+  if (!contentType.includes("text/html")) {
+    const error = new Error("Instagram URL did not return an image or an Instagram page.");
+    error.status = 422;
+    throw error;
+  }
+
+  const imageUrl = extractOgImage(Buffer.from(response.data).toString("utf8"));
+  if (!imageUrl || !isAllowedInstagramUrl(imageUrl)) {
+    const error = new Error("Could not find a downloadable image at that Instagram URL.");
+    error.status = 422;
+    throw error;
+  }
+
+  const imageResponse = await axios.get(imageUrl, {
+    responseType: "arraybuffer",
+    headers,
+    maxContentLength: MAX_REMOTE_IMAGE_BYTES,
+    maxBodyLength: MAX_REMOTE_IMAGE_BYTES,
+    timeout: 20000,
+    validateStatus: (status) => status >= 200 && status < 400,
+  });
+  const imageContentType = String(imageResponse.headers["content-type"] || "image/jpeg").toLowerCase();
+  if (!imageContentType.startsWith("image/")) {
+    const error = new Error("Instagram did not return a downloadable image.");
+    error.status = 422;
+    throw error;
+  }
+
+  return {
+    buffer: Buffer.from(imageResponse.data),
+    contentType: imageContentType.split(";")[0] || "image/jpeg",
+  };
+}
+
+router.get("/instagram/image", requireAuth, async (req, res) => {
+  const imageUrl = String(req.query.url || "").trim();
+  try {
+    const { buffer, contentType } = await fetchInstagramImage(imageUrl);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", String(buffer.length));
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.send(buffer);
+  } catch (err) {
+    const status = Number(err?.status) || err.response?.status || 502;
+    logApiError("GET /instagram/image", err);
+    return res.status(status >= 400 && status < 600 ? status : 502).json({
+      detail: err.message || "Failed to fetch Instagram image.",
+    });
+  }
+});
 
 router.post("/images", requireAuth, upload.single("file"), async (req, res) => {
   if (!req.file) {
