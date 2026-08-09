@@ -19,6 +19,7 @@ from .face_swap import FaceSwapService, GENDER_FEMALE, GENDER_MALE, SWAP_MODEL_I
 from .model_registry import get_model_registry
 from .observability import configure_logging, get_logger, timed_log
 from .settings import get_settings
+from .output_storage import upload_output
 from .video_swap import resolve_worker_count, swap_video_frames
 
 
@@ -26,7 +27,7 @@ def _parse_form_bool(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _encode_output_image(image: Image.Image, output_format: Optional[str]) -> Response:
+def _encode_output_image(image: Image.Image, output_format: Optional[str]) -> tuple[bytes, str]:
     """Encode the swapped image, defaulting to high-quality JPEG.
 
     Chroma subsampling is disabled: at the blend edge and across skin it does
@@ -35,7 +36,7 @@ def _encode_output_image(image: Image.Image, output_format: Optional[str]) -> Re
     buffered = io.BytesIO()
     if (output_format or "").strip().lower() == "png":
         image.save(buffered, format="PNG", optimize=True)
-        return Response(content=buffered.getvalue(), media_type="image/png")
+        return buffered.getvalue(), "image/png"
 
     image.save(
         buffered,
@@ -44,7 +45,7 @@ def _encode_output_image(image: Image.Image, output_format: Optional[str]) -> Re
         subsampling=0,
         optimize=True,
     )
-    return Response(content=buffered.getvalue(), media_type="image/jpeg")
+    return buffered.getvalue(), "image/jpeg"
 
 
 def _gender_from_tensor(tensors: dict) -> Optional[str]:
@@ -155,6 +156,23 @@ def _post_generated_video(
             "callback_post_error",
             extra={"event": "callback_post_error", "error": str(exc)},
         )
+
+
+def _storage_fields(
+    storage_key: Optional[str],
+    storage_repo: Optional[str],
+    storage_repo_type: Optional[str],
+    storage_branch: Optional[str],
+) -> tuple[str, str, str, str]:
+    key = str(storage_key or "").strip()
+    repo = str(storage_repo or os.environ.get("HF_STORAGE_REPO") or "").strip()
+    repo_type = str(storage_repo_type or os.environ.get("HF_STORAGE_REPO_TYPE") or "dataset").strip()
+    branch = str(storage_branch or os.environ.get("HF_STORAGE_BRANCH") or "main").strip() or "main"
+    if not key:
+        raise HTTPException(status_code=400, detail="storage_key is required")
+    if not repo:
+        raise HTTPException(status_code=500, detail="HF_STORAGE_REPO is not configured")
+    return key, repo, repo_type, branch
 
 
 def _post_video_progress(
@@ -273,6 +291,10 @@ def create_app() -> FastAPI:
         manual_gender: Optional[str] = Form(None),
         swap_model: Optional[str] = Form(None),
         output_format: Optional[str] = Form(None),
+        storage_key: Optional[str] = Form(None),
+        storage_repo: Optional[str] = Form(None),
+        storage_repo_type: Optional[str] = Form(None),
+        storage_branch: Optional[str] = Form(None),
         model_file: UploadFile = File(...),
         target_image: UploadFile = File(...),
     ):
@@ -344,7 +366,48 @@ def create_app() -> FastAPI:
                 swap_model=effective_swap_model,
             )
         with timed_log(logger, "encode_output_image"):
-            return _encode_output_image(output_image, output_format)
+            output_bytes, mime_type = _encode_output_image(output_image, output_format)
+
+        output_key, repo_id, repo_type, branch = _storage_fields(
+            storage_key,
+            storage_repo,
+            storage_repo_type,
+            storage_branch,
+        )
+        suffix = ".png" if mime_type == "image/png" else ".jpg"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as output_file:
+            output_file.write(output_bytes)
+            local_output_path = output_file.name
+        try:
+            with timed_log(logger, "upload_output_image"):
+                output_size = upload_output(
+                    local_output_path,
+                    output_key,
+                    repo_id,
+                    repo_type,
+                    branch,
+                    commit_message=f"Store generated image {output_key}",
+                )
+        except Exception as exc:
+            logger.exception(
+                "upload_output_image_failed",
+                extra={"event": "upload_output_image_failed", "error": str(exc)},
+            )
+            raise HTTPException(status_code=502, detail=f"Output storage failed: {exc}")
+        finally:
+            if os.path.exists(local_output_path):
+                os.remove(local_output_path)
+
+        return JSONResponse(
+            content={
+                "status": "completed",
+                "storage_provider": "huggingface",
+                "storage_key": output_key,
+                "filename": output_key.rsplit("/", 1)[-1],
+                "mime_type": mime_type,
+                "size": output_size,
+            }
+        )
 
     @app.post("/embedding")
     async def create_embedding(files: List[UploadFile] = File(..., alias="file")):
@@ -411,9 +474,12 @@ def create_app() -> FastAPI:
         apply_hair: str = Form("0"),
         manual_gender: Optional[str] = Form(None),
         swap_model: Optional[str] = Form(None),
-        callback_url: Optional[str] = Form(None),
         progress_url: Optional[str] = Form(None),
         callback_token: Optional[str] = Form(None),
+        storage_key: Optional[str] = Form(None),
+        storage_repo: Optional[str] = Form(None),
+        storage_repo_type: Optional[str] = Form(None),
+        storage_branch: Optional[str] = Form(None),
         model_file: UploadFile = File(...),
         target_video: UploadFile = File(...),
     ):
@@ -578,21 +644,34 @@ def create_app() -> FastAPI:
                     "frame_count": frame_count,
                 },
             )
-            if callback_url:
-                with timed_log(logger, "post_output_video", frame_count=frame_count):
-                    _post_generated_video(
-                        callback_url=callback_url,
-                        output_bytes=output_bytes,
-                        filename=f"swapped-{uuid.uuid4().hex}.mp4",
-                        mime_type="video/mp4",
-                        callback_token=callback_token,
-                        total_frames=total_frames,
-                        processed_frames=frame_count,
-                        progress_percent=100,
-                        logger=logger,
-                    )
-                return JSONResponse(content={"status": "posted"}, status_code=202)
-            return Response(content=output_bytes, media_type="video/mp4")
+            output_key, repo_id, repo_type, branch = _storage_fields(
+                storage_key,
+                storage_repo,
+                storage_repo_type,
+                storage_branch,
+            )
+            with timed_log(logger, "upload_output_video", frame_count=frame_count):
+                output_size = upload_output(
+                    output_path,
+                    output_key,
+                    repo_id,
+                    repo_type,
+                    branch,
+                    commit_message=f"Store generated video {output_key}",
+                )
+            return JSONResponse(
+                content={
+                    "status": "completed",
+                    "storage_provider": "huggingface",
+                    "storage_key": output_key,
+                    "filename": output_key.rsplit("/", 1)[-1],
+                    "mime_type": "video/mp4",
+                    "size": output_size,
+                    "total_frames": total_frames or 0,
+                    "processed_frames": frame_count,
+                    "progress_percent": 100,
+                }
+            )
         except HTTPException:
             raise
         except Exception as exc:

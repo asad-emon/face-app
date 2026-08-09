@@ -3,7 +3,10 @@ import cors from "cors";
 import { initDb, SwapJob } from "./db.js";
 import { CLIENT_ORIGIN, PORT } from "./config.js";
 import { logApiError } from "./utils/logging.js";
-import { bootstrapSwapQueue, bootstrapVideoSwapQueue } from "./services/swapService.js";
+import {
+  bootstrapSwapQueue,
+  bootstrapVideoSwapQueue,
+} from "./services/swapService.js";
 import authRoutes from "./routes/auth.js";
 import systemRoutes from "./routes/system.js";
 import modelRoutes from "./routes/models.js";
@@ -24,7 +27,7 @@ app.use(
     origin: origins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  })
+  }),
 );
 
 app.use(express.json({ limit: "10mb" }));
@@ -46,7 +49,7 @@ async function start() {
     await initDb();
     await SwapJob.updateMany(
       { status: "processing" },
-      { $set: { status: "queued", started_at: null, error: null } }
+      { $set: { status: "queued", started_at: null, error: null } },
     );
     await bootstrapSwapQueue();
     await bootstrapVideoSwapQueue();

@@ -1,10 +1,14 @@
 import axios from "axios";
 import FormData from "form-data";
+import { randomUUID } from "crypto";
 import { FaceModel, GeneratedImage, InputImage, SwapJob, GeneratedVideo, User } from "../db.js";
 import {
   INFERENCE_BASE_URL,
   INFERENCE_CALLBACK_TOKEN,
   API_BASE_URL,
+  HF_STORAGE_REPO,
+  HF_STORAGE_REPO_TYPE,
+  HF_STORAGE_BRANCH,
   SWAP_MAX_RETRIES,
   SWAP_RETRY_DELAY_MS,
   SWAP_TIMEOUT_MS,
@@ -41,7 +45,17 @@ function shouldRetrySwapRequest(err) {
   return false;
 }
 
-async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, enableRestore, expressionStrength, manualGender, swapModel = "inswapper_128") {
+async function runSwapRemote(
+  modelBytes,
+  imageBytes,
+  imageFilename,
+  modelId,
+  enableRestore,
+  expressionStrength,
+  manualGender,
+  swapModel = "inswapper_128",
+  storageKey,
+) {
   let response;
   for (let attempt = 0; attempt <= SWAP_MAX_RETRIES; attempt += 1) {
     const form = new FormData();
@@ -54,6 +68,10 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
     if (swapModel && swapModel !== "inswapper_128") {
       form.append("swap_model", swapModel);
     }
+    form.append("storage_key", storageKey);
+    form.append("storage_repo", HF_STORAGE_REPO);
+    form.append("storage_repo_type", HF_STORAGE_REPO_TYPE);
+    form.append("storage_branch", HF_STORAGE_BRANCH);
     form.append("model_file", modelBytes, {
       filename: "model.safetensors",
       contentType: "application/octet-stream",
@@ -66,7 +84,7 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
     try {
       response = await axios.post(`${INFERENCE_BASE_URL}/swap-remote`, form, {
         headers: form.getHeaders(),
-        responseType: "arraybuffer",
+        responseType: "json",
         timeout: SWAP_TIMEOUT_MS,
         maxBodyLength: Infinity,
         maxContentLength: Infinity,
@@ -86,7 +104,7 @@ async function runSwapRemote(modelBytes, imageBytes, imageFilename, modelId, ena
       }
     }
   }
-  return Buffer.from(response.data);
+  return response.data;
 }
 
 export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, expressionStrength, swapModel = "inswapper_128") {
@@ -112,7 +130,12 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
     downloadBuffer(image.drive_file_id, owner, image.storage_provider),
   ]);
 
-  const outputBytes = await runSwapRemote(
+  if (!HF_STORAGE_REPO) {
+    throw new Error("HF_STORAGE_REPO is required for inference output storage");
+  }
+
+  const storageKey = `generated/images/${ownerId}/${randomUUID()}.jpg`;
+  const output = await runSwapRemote(
     modelBytes,
     imageBytes,
     image.filename,
@@ -120,38 +143,30 @@ export async function runSwapAndStore(ownerId, modelId, imageId, enableRestore, 
     enableRestore,
     expressionStrength,
     model.gender || null,
-    swapModel
+    swapModel,
+    storageKey,
   );
 
-  let driveResult;
-  try {
-    driveResult = await uploadBuffer({
-      buffer: outputBytes,
-      filename: `swap-${ownerId}-${modelId}-${imageId}-${Date.now()}.jpg`,
-      mimeType: "image/jpeg",
-      authUser: owner,
-    });
-  } catch (err) {
-    throw new Error(`Storage upload failed: ${err.message}`);
+  if (output?.status !== "completed" || output.storage_key !== storageKey) {
+    throw new Error("Inference did not confirm image output storage");
   }
 
   let generated;
   try {
     generated = await GeneratedImage.create({
-      drive_file_id: driveResult.drive_file_id,
-      storage_provider: driveResult.storage_provider,
-      mime_type: driveResult.mime_type,
-      size: driveResult.size,
+      drive_file_id: output.storage_key,
+      storage_provider: "huggingface",
+      mime_type: output.mime_type || "image/jpeg",
+      size: Number(output.size) || 0,
       owner_id: ownerId,
       input_image_id: imageId,
       face_model_id: modelId,
     });
   } catch (err) {
-    await deleteFile(driveResult.drive_file_id, owner, driveResult.storage_provider).catch(() => { });
     throw err;
   }
 
-  return { outputBytes, generatedImageId: generated.id };
+  return { generatedImageId: generated.id };
 }
 
 export async function triggerVideoSwap({
@@ -165,9 +180,9 @@ export async function triggerVideoSwap({
   expressionStrength,
   manualGender,
   swapModel,
-  callbackUrl,
   progressUrl,
   callbackToken,
+  storageKey,
 }) {
   const form = new FormData();
   form.append("model_id", String(modelId));
@@ -179,15 +194,16 @@ export async function triggerVideoSwap({
   if (swapModel && swapModel !== "inswapper_128") {
     form.append("swap_model", swapModel);
   }
-  if (callbackUrl) {
-    form.append("callback_url", callbackUrl);
-  }
   if (progressUrl) {
     form.append("progress_url", progressUrl);
   }
   if (callbackToken) {
     form.append("callback_token", callbackToken);
   }
+  form.append("storage_key", storageKey);
+  form.append("storage_repo", HF_STORAGE_REPO);
+  form.append("storage_repo_type", HF_STORAGE_REPO_TYPE);
+  form.append("storage_branch", HF_STORAGE_BRANCH);
   form.append("model_file", modelBytes, {
     filename: "model.safetensors",
     contentType: "application/octet-stream",
@@ -407,15 +423,16 @@ async function processVideoSwapJob(videoId) {
       throw new Error("INFERENCE_BASE_URL is not configured");
     }
 
-    const callbackBase = API_BASE_URL || "";
-    if (!callbackBase) {
-      throw new Error("API_BASE_URL is required for background video callbacks");
+    if (!HF_STORAGE_REPO) {
+      throw new Error("HF_STORAGE_REPO is required for inference output storage");
     }
-    const callbackUrl = `${callbackBase}/internal/videos/generated/${video.id}/content`;
-    const progressUrl = `${callbackBase}/internal/videos/generated/${video.id}/progress`;
+    const callbackBase = API_BASE_URL || "";
+    const progressUrl = callbackBase
+      ? `${callbackBase}/internal/videos/generated/${video.id}/progress`
+      : "";
+    const storageKey = `generated/videos/${video.owner_id}/${video.id}-${randomUUID()}.mp4`;
 
-    await triggerVideoSwap({
-      generatedVideoId: video.id,
+    const output = await triggerVideoSwap({
       modelBytes,
       videoBytes,
       videoFilename: video.filename,
@@ -425,13 +442,25 @@ async function processVideoSwapJob(videoId) {
       expressionStrength: video.expression_strength,
       manualGender: model.gender || null,
       swapModel: video.swap_model || "inswapper_128",
-      callbackUrl,
       progressUrl,
       callbackToken: INFERENCE_CALLBACK_TOKEN,
+      storageKey,
     });
 
     const completed = await GeneratedVideo.findOne({ id: video.id });
-    if (completed && completed.status === "processing" && completed.drive_file_id) {
+    if (
+      completed &&
+      completed.status === "processing" &&
+      output?.status === "completed" &&
+      output.storage_key === storageKey
+    ) {
+      completed.drive_file_id = output.storage_key;
+      completed.storage_provider = "huggingface";
+      completed.mime_type = output.mime_type || "video/mp4";
+      completed.size = Number(output.size) || 0;
+      completed.total_frames = Number(output.total_frames) || completed.total_frames;
+      completed.processed_frames =
+        Number(output.processed_frames) || completed.processed_frames;
       completed.status = "done";
       completed.processing = false;
       completed.progress_percent = 100;
@@ -439,8 +468,8 @@ async function processVideoSwapJob(videoId) {
       completed.finished_at = completed.finished_at || new Date();
       await completed.save();
       await deleteVideoInputIfNotSaved(completed, owner);
-    } else if (completed && !completed.drive_file_id && completed.status === "processing") {
-      throw new Error("Inference finished without posting generated video content");
+    } else if (completed && completed.status === "processing") {
+      throw new Error("Inference did not confirm video output storage");
     }
   } catch (err) {
     await markVideoFailed(video, err);
