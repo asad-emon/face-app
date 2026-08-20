@@ -54,6 +54,45 @@ function extractOgImage(html) {
   return "";
 }
 
+function decodeInstagramUrl(value) {
+  return decodeHtmlEntities(String(value || ""))
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\u003d/gi, "=")
+    .replace(/\\u002f/gi, "/")
+    .replace(/\\\//g, "/")
+    .replace(/\\"/g, '"');
+}
+
+function extractInstagramImageUrls(html) {
+  const source = String(html || "");
+  const candidates = [];
+  const addCandidate = (value) => {
+    const decoded = decodeInstagramUrl(value).trim();
+    if (decoded && isAllowedInstagramUrl(decoded)) {
+      candidates.push(decoded);
+    }
+  };
+
+  const metaTags = source.match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of metaTags) {
+    const property = tag.match(/\b(?:property|name)\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (/^og:image(?::secure_url)?$/i.test(String(property || ""))) {
+      addCandidate(tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1]);
+    }
+  }
+
+  // Instagram embeds the original carousel images as display_url values in
+  // the page JSON. These are higher-resolution than the og:image preview.
+  for (const match of source.matchAll(/["']display_url["']\s*:\s*["']([^"']+)["']/gi)) {
+    addCandidate(match[1]);
+  }
+  for (const match of source.matchAll(/["']image_versions2["'][\s\S]{0,800}?["']url["']\s*:\s*["']([^"']+)["']/gi)) {
+    addCandidate(match[1]);
+  }
+
+  return [...new Set(candidates)];
+}
+
 async function fetchInstagramImage(rawUrl) {
   if (!isAllowedInstagramUrl(rawUrl)) {
     const error = new Error("Only HTTPS Instagram image or post URLs are supported.");
@@ -89,7 +128,8 @@ async function fetchInstagramImage(rawUrl) {
     throw error;
   }
 
-  const imageUrl = extractOgImage(Buffer.from(response.data).toString("utf8"));
+  const html = Buffer.from(response.data).toString("utf8");
+  const imageUrl = extractInstagramImageUrls(html)[0] || extractOgImage(html);
   if (!imageUrl || !isAllowedInstagramUrl(imageUrl)) {
     const error = new Error("Could not find a downloadable image at that Instagram URL.");
     error.status = 422;
@@ -116,6 +156,45 @@ async function fetchInstagramImage(rawUrl) {
     contentType: imageContentType.split(";")[0] || "image/jpeg",
   };
 }
+
+router.get("/instagram/images", requireAuth, async (req, res) => {
+  const postUrl = String(req.query.url || "").trim();
+  if (!isAllowedInstagramUrl(postUrl)) {
+    return res.status(400).json({ detail: "Only HTTPS Instagram post URLs are supported." });
+  }
+
+  try {
+    const response = await axios.get(postUrl, {
+      responseType: "text",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; FaceAppImageImporter/1.0; +https://www.instagram.com/)",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      maxContentLength: MAX_REMOTE_IMAGE_BYTES,
+      timeout: 20000,
+      validateStatus: (status) => status >= 200 && status < 400,
+    });
+    const urls = extractInstagramImageUrls(response.data);
+    if (urls.length === 0) {
+      return res.status(422).json({ detail: "Could not find images in that Instagram post." });
+    }
+    return res.json({
+      items: urls.map((imageUrl, index) => ({
+        id: `${index}-${Buffer.from(imageUrl).toString("base64url").slice(0, 16)}`,
+        url: imageUrl,
+        preview_url: `/instagram/image?url=${encodeURIComponent(imageUrl)}`,
+      })),
+      total: urls.length,
+    });
+  } catch (err) {
+    const status = Number(err?.status) || err.response?.status || 502;
+    logApiError("GET /instagram/images", err);
+    return res.status(status >= 400 && status < 600 ? status : 502).json({
+      detail: err.message || "Failed to fetch Instagram post images.",
+    });
+  }
+});
 
 router.get("/instagram/image", requireAuth, async (req, res) => {
   const imageUrl = String(req.query.url || "").trim();

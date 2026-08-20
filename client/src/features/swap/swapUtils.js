@@ -135,5 +135,38 @@ export async function buildInstagramImageFileFromUrl(url, token) {
         : contentType === 'image/gif'
           ? 'gif'
           : 'jpg';
-  return new File([blob], `instagram-image.${extension}`, { type: contentType });
+  return new File([blob], `instagram-image-${Date.now()}.${extension}`, { type: contentType });
+}
+
+export async function fetchInstagramPostImages(url, token) {
+  const normalizedUrl = String(url || '').trim();
+  if (!normalizedUrl) {
+    throw new Error('Please enter an Instagram post URL.');
+  }
+  const response = await fetch(
+    `${apiBaseUrl}/instagram/images?url=${encodeURIComponent(normalizedUrl)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    let detail = 'Failed to fetch Instagram post images.';
+    try {
+      detail = (await response.json())?.detail || detail;
+    } catch (_err) {
+      // Keep the friendly fallback.
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+export async function fetchInstagramImagePreviewUrl(url, token) {
+  const response = await fetch(
+    `${apiBaseUrl}/instagram/image?url=${encodeURIComponent(String(url || '').trim())}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to load Instagram image preview (${response.status}).`);
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
