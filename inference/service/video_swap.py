@@ -43,11 +43,17 @@ MAX_AUTO_WORKERS = 4
 
 
 def resolve_worker_count(configured: int, cpu_count: Optional[int] = None) -> int:
-    """Worker count to use; `configured` <= 0 means auto."""
-    if configured > 0:
-        return configured
+    """Worker count to use; `configured` <= 0 means auto.
+
+    Always leaves at least one CPU thread free for the FastAPI process itself
+    (health checks, progress callbacks, concurrent image-swap requests) - a
+    video job never gets to claim every core.
+    """
     cores = cpu_count if cpu_count is not None else (os.cpu_count() or 1)
-    return max(1, min(MAX_AUTO_WORKERS, cores // 2))
+    ceiling = max(1, cores - 1)
+    if configured > 0:
+        return min(configured, ceiling)
+    return max(1, min(MAX_AUTO_WORKERS, cores // 2, ceiling))
 
 
 def swap_video_frames(
@@ -64,13 +70,13 @@ def swap_video_frames(
     so progress never runs ahead of finished work.
     """
     worker_count = max(1, worker_count)
+    cpu_total = os.cpu_count() or 1
+    logger.info(
+        "video_workers",
+        extra={"event": "video_workers", "worker_count": worker_count, "cpu_total": cpu_total},
+    )
     if worker_count == 1:
         return _swap_serial(cap, writer, swap_frame, on_progress, progress_every)
-
-    logger.info(
-        "video_parallel_start",
-        extra={"event": "video_parallel_start", "worker_count": worker_count},
-    )
 
     written = 0
     last_reported = 0

@@ -306,7 +306,11 @@ order. The bounded deque also prevents the entire video from being decoded
 into memory. If `VIDEO_WORKER_COUNT` is zero or negative, the service
 auto-selects up to four workers, capped at roughly half of the available CPU
 cores. A configured positive value is used directly, with a minimum of one.
-A single worker uses a serial path without thread-pool overhead.
+Either way, the resolved count is capped at one below the total logical CPU
+count, so a video job always leaves a thread free for the FastAPI process
+(health checks, progress callbacks, concurrent image-swap requests). A single
+worker uses a serial path without thread-pool overhead. Both paths log the
+resolved `worker_count` alongside the machine's `cpu_total`.
 
 #### 8. Each frame runs the face-swap operation
 
