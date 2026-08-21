@@ -1,12 +1,12 @@
 import express from "express";
-import { FaceModel, GeneratedVideo, InputImage, SwapJob } from "../db.js";
+import { FaceModel, GeneratedImage, GeneratedVideo, InputImage, SwapJob } from "../db.js";
 import { API_BASE_URL, INFERENCE_BASE_URL, SWAP_QUEUE_POLL_LIMIT } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
 import upload from "../middleware/upload.js";
 import { logApiError } from "../utils/logging.js";
 import { getErrorDetail, parseBoolean, parseSwapModel } from "../utils/parsing.js";
 import { serializeGeneratedVideo, serializeSwapJob } from "../utils/serialize.js";
-import { uploadBuffer, deleteFile } from "../services/storage.js";
+import { uploadBuffer, downloadBuffer, deleteFile } from "../services/storage.js";
 import { enqueueSwapJob, enqueueVideoSwapJob, runSwapAndStore } from "../services/swapService.js";
 import { getUserSettings } from "../services/settingsService.js";
 
@@ -123,9 +123,18 @@ router.post("/swap", requireAuth, async (req, res) => {
   }
 
   try {
-    const { outputBytes } = await runSwapAndStore(req.user.id, modelId, imageId, enableRestore, expressionStrength, swapModel);
+    const { generatedImageId } = await runSwapAndStore(req.user.id, modelId, imageId, enableRestore, expressionStrength, swapModel);
+    const generatedImage = await GeneratedImage.findOne({ id: generatedImageId, owner_id: req.user.id }).lean();
+
+    let result = null;
+    if (generatedImage?.drive_file_id) {
+      const outputBytes = await downloadBuffer(generatedImage.drive_file_id, req.user, generatedImage.storage_provider);
+      result = `data:${generatedImage.mime_type || "image/jpeg"};base64,${outputBytes.toString("base64")}`;
+    }
+
     return res.json({
-      result: `data:image/jpeg;base64,${outputBytes.toString("base64")}`,
+      generated_image_id: generatedImageId,
+      result,
     });
   } catch (err) {
     if (String(err?.message || "").toLowerCase().includes("not found")) {
