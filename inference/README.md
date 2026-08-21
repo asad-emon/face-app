@@ -93,7 +93,8 @@ loading ~1 GB each. Output order is preserved, and the result is bit-identical
 to serial processing.
 
 - `VIDEO_WORKER_COUNT=0` — `0` auto-sizes to `min(4, cores / 2)`. Set a number
-  to override.
+  to override. Either way, at least one CPU thread is always left free for
+  the FastAPI process itself, so a video job never claims every core.
 
 Scaling is sub-linear, because ONNX Runtime already spreads each individual
 inference across every core. Measured on 12 cores at 640x480 with two faces per

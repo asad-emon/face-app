@@ -608,11 +608,13 @@ def create_app() -> FastAPI:
                 )
 
             worker_count = resolve_worker_count(get_settings().video_worker_count)
+            cpu_total = os.cpu_count() or 1
             with timed_log(
                 logger,
                 "swap_remote_video_inference",
                 restore_enabled=restore_enabled,
                 worker_count=worker_count,
+                cpu_total=cpu_total,
             ):
                 frame_count = swap_video_frames(
                     cap,
